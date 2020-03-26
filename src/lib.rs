@@ -32,6 +32,7 @@ pub mod sonic;
 pub mod plonk;
 #[macro_use]
 extern crate lazy_static;
+pub mod marlin;
 
 mod group;
 mod source;
