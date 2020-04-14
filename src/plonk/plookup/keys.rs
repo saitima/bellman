@@ -497,7 +497,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> VerificationKey<E, P> {
         worker: &Worker,
         crs: &Crs<E, CrsForMonomialForm>,
     ) -> Result<Self, SynthesisError> {
-        assert_eq!(setup.selector_polynomials.len(), P::STATE_WIDTH + 2);
+        assert_eq!(setup.selector_polynomials.len(), P::STATE_WIDTH + 3 );
         if P::CAN_ACCESS_NEXT_TRACE_STEP == false {
             assert_eq!(setup.next_step_selector_polynomials.len(), 0);
         }
