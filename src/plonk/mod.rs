@@ -13,6 +13,7 @@ pub mod transparent_engine;
 pub mod redshift;
 
 pub mod plonk;
+pub mod plookup;
 
 pub mod commitments;
 
