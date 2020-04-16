@@ -493,7 +493,10 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         // calculate first part of the quotient polynomial - the gate itself
         // A + B + C + D + AB + CONST + D_NEXT == 0 everywhere but on the last point of the domain
-
+        
+        // after introducing new selector constant is shifted one step to the left
+        let selector_q_const_index = setup.selector_polynomials.len()-2;
+        
         let mut quotient_linearization_challenge = E::Fr::one();
 
         let (mut t_1, mut tmp) = {
@@ -506,10 +509,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
             let mut inputs_poly = inputs_poly.ifft_using_bitreversed_ntt(&worker, omegas_inv_bitreversed, &E::Fr::one())?;
 
-            // add constants selectors vector
-            // after introducing new selector constant is shifted one step to the left
-            let offset_const_selector = setup.selector_polynomials.len()-2;
-            inputs_poly.add_assign(&worker, &setup.selector_polynomials[offset_const_selector]);
+            // add constants selectors vector            
+            inputs_poly.add_assign(&worker, &setup.selector_polynomials[selector_q_const_index]);
 
             // LDE
             let mut t_1 = inputs_poly.bitreversed_lde_using_bitreversed_ntt(
@@ -735,7 +736,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         let r = {
             // Q_const
-            let mut r = setup.selector_polynomials[5].clone();
+            let mut r = setup.selector_polynomials[selector_q_const_index].clone();
 
             // Q_A * A(z)
             r.add_assign_scaled(&worker, &setup.selector_polynomials[0], &proof.wire_values_at_z[0]);

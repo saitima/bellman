@@ -199,7 +199,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomialsPrecomputatio
         // let coset_generator = E::Fr::one();
 
         // we do not precompute q_const as we need to use it for public inputs;
-        for p in setup.selector_polynomials[0..(setup.selector_polynomials.len() - 1)].iter() {
+        let selector_q_const_index = setup.selector_polynomials.len()-2;
+        for (i, p) in setup.selector_polynomials.iter().enumerate() {
+            if i == selector_q_const_index{
+                continue;
+            }
             let ext = p.clone().bitreversed_lde_using_bitreversed_ntt(
                 &worker,
                 LDE_FACTOR,

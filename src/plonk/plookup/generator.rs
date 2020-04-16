@@ -196,7 +196,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let mut q_d = vec![E::Fr::zero(); total_num_gates];
         let mut q_m = vec![E::Fr::zero(); total_num_gates];
         let mut q_const = vec![E::Fr::zero(); total_num_gates];
-        let mut q_plookup = vec![E::Fr::zero(); total_num_gates];
+        let mut q_lookup = vec![E::Fr::zero(); total_num_gates];
 
         let mut q_d_next = vec![E::Fr::zero(); total_num_gates];
 
@@ -220,14 +220,14 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let q_d_aux = &mut q_d[num_input_gates..];
         let q_m_aux = &mut q_m[num_input_gates..];
         let q_const_aux = &mut q_const[num_input_gates..];
-        let q_plookup_aux = &mut q_plookup[num_input_gates..];
+        let q_lookup_aux = &mut q_lookup[num_input_gates..];
 
         let q_d_next_aux = &mut q_d_next[num_input_gates..];
 
         debug_assert!(self.aux_gates.len() == q_a_aux.len());
 
         worker.scope(self.aux_gates.len(), |scope, chunk| {
-            for ((((((((gate, q_a), q_b), q_c), q_d), q_m), q_plookup), q_const), q_d_next) 
+            for ((((((((gate, q_a), q_b), q_c), q_d), q_m), q_lookup), q_const), q_d_next) 
                 in self.aux_gates.chunks(chunk)
                     .zip(q_a_aux.chunks_mut(chunk))
                     .zip(q_b_aux.chunks_mut(chunk))
@@ -235,11 +235,11 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
                     .zip(q_d_aux.chunks_mut(chunk))
                     .zip(q_m_aux.chunks_mut(chunk))
                     .zip(q_const_aux.chunks_mut(chunk))
-                    .zip(q_plookup_aux.chunks_mut(chunk))
+                    .zip(q_lookup_aux.chunks_mut(chunk))
                     .zip(q_d_next_aux.chunks_mut(chunk))
             {
                 scope.spawn(move |_| {
-                    for ((((((((gate, q_a), q_b), q_c), q_d), q_m), q_plookup), q_const), q_d_next) 
+                    for ((((((((gate, q_a), q_b), q_c), q_d), q_m), q_lookup), q_const), q_d_next) 
                     in gate.iter()
                             .zip(q_a.iter_mut())
                             .zip(q_b.iter_mut())
@@ -247,7 +247,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
                             .zip(q_d.iter_mut())
                             .zip(q_m.iter_mut())
                             .zip(q_const.iter_mut())
-                            .zip(q_plookup.iter_mut())
+                            .zip(q_lookup.iter_mut())
                             .zip(q_d_next.iter_mut())
                         {
                             *q_a = gate.1[0];
@@ -256,7 +256,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
                             *q_d = gate.1[3];
                             *q_m = gate.1[4];
                             *q_const = gate.1[5];
-                            *q_plookup = gate.1[6];
+                            *q_lookup = gate.1[6];
 
                             *q_d_next = gate.2[0];
                         }
@@ -270,13 +270,13 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let q_d = Polynomial::from_values(q_d)?;
         let q_m = Polynomial::from_values(q_m)?;
         let q_const = Polynomial::from_values(q_const)?;
-        let q_plookup = Polynomial::from_values(q_plookup)?;
+        let q_lookup = Polynomial::from_values(q_lookup)?;
 
-        q_plookup.as_ref().iter().for_each(|e| println!("{}", e));
+        q_lookup.as_ref().iter().for_each(|e| println!("{}", e));
 
         let q_d_next = Polynomial::from_values(q_d_next)?;
 
-        Ok(([q_a, q_b, q_c, q_d, q_m, q_const, q_plookup], [q_d_next]))
+        Ok(([q_a, q_b, q_c, q_d, q_m, q_const, q_lookup], [q_d_next]))
     }
 
     pub(crate) fn make_permutations(&self, worker: &Worker) -> [Polynomial::<E::Fr, Values>; 4] {
@@ -420,7 +420,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
 
         let [sigma_1, sigma_2, sigma_3, sigma_4] = self.make_permutations(&worker);
 
-        let ([q_a, q_b, q_c, q_d, q_m, q_const,q_plookup],
+        let ([q_a, q_b, q_c, q_d, q_m,q_const, q_lookup],
             [q_d_next]) = self.make_selector_polynomials(&worker)?;
 
         drop(self);
@@ -436,14 +436,14 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let q_d = q_d.ifft(&worker);
         let q_m = q_m.ifft(&worker);
         let q_const = q_const.ifft(&worker);
-        let q_plookup = q_plookup.ifft(&worker);
+        let q_lookup = q_lookup.ifft(&worker);
 
         let q_d_next = q_d_next.ifft(&worker);
 
         let setup = SetupPolynomials::<E, PlonkCsWidth4WithNextStepParams> {
             n,
             num_inputs,
-            selector_polynomials: vec![q_a, q_b, q_c, q_d, q_m, q_const,q_plookup],
+            selector_polynomials: vec![q_a, q_b, q_c, q_d, q_m, q_const, q_lookup],
             next_step_selector_polynomials: vec![q_d_next],
             permutation_polynomials: vec![sigma_1, sigma_2, sigma_3, sigma_4],
         
