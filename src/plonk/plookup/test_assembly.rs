@@ -166,8 +166,8 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Te
         self.dummy_variable()
     }
 
-    fn read_from_table(&mut self, a: Variable, b: Variable) -> Result<(), SynthesisError>{
-        Ok(())
+    fn read_from_table(&mut self, a: Variable, b: Variable) -> Result<Variable, SynthesisError>{
+        Ok(self.get_dummy_variable())
     }
 }
 

@@ -82,7 +82,7 @@ pub trait ConstraintSystem<E: Engine, P: PlonkConstraintSystemParams<E>> {
 
     fn get_dummy_variable(&self) -> Variable;
 
-    fn read_from_table(&mut self, a: Variable, b: Variable) -> Result<(), SynthesisError>;
+    fn read_from_table(&mut self, a: Variable, b: Variable) -> Result<Variable, SynthesisError>;
 }
 
 

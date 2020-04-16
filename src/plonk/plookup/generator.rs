@@ -78,15 +78,22 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Ge
     }
 
     fn get_value(&self, _var: Variable) -> Result<E::Fr, SynthesisError> {
-        Err(SynthesisError::AssignmentMissing)
+        // Err(SynthesisError::AssignmentMissing) // @TODO: ask Alex
+        Ok(E::Fr::zero())
     }
 
     fn get_dummy_variable(&self) -> Variable {
         self.dummy_variable()
     }
 
-    fn read_from_table(&mut self, a: Variable, b: Variable) -> Result<(), SynthesisError>{
-        Ok(())
+    fn read_from_table(&mut self, _a: Variable, _b: Variable) -> Result<Variable, SynthesisError>{
+        let variables = P::StateVariables::from_variables(&vec![self.get_dummy_variable();4]);
+        let mut coeffs = vec![E::Fr::zero(); 7];
+        coeffs[6] = E::Fr::one();
+        let this_step_coeffs = P::ThisTraceStepCoefficients::from_coeffs(&coeffs);
+        let next_step_coeffs = P::NextTraceStepCoefficients::empty();
+        self.new_gate(variables, this_step_coeffs, next_step_coeffs)?;
+        Ok(self.get_dummy_variable())
     }
 }
 
@@ -264,6 +271,8 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let q_m = Polynomial::from_values(q_m)?;
         let q_const = Polynomial::from_values(q_const)?;
         let q_plookup = Polynomial::from_values(q_plookup)?;
+
+        q_plookup.as_ref().iter().for_each(|e| println!("{}", e));
 
         let q_d_next = Polynomial::from_values(q_d_next)?;
 
@@ -444,29 +453,6 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         Ok(setup)
     }
 }
-
-// use crate::ff::SqrtField;
-
-// pub(crate) fn make_non_residues<F: SqrtField>(num: usize) -> Vec<F> {
-
-//     use crate::ff::LegendreSymbol;
-
-//     let mut non_residues = vec![];
-//     let mut current = F::one();
-//     let one = F::one();
-//     for _ in 0..num {
-//         loop {
-//             if current.legendre() != LegendreSymbol::QuadraticNonResidue {
-//                 current.add_assign(&one);
-//             } else {
-//                 non_residues.push(current);
-//                 break;
-//             }
-//         }
-//     }
-
-//     non_residues
-// }
 
 #[cfg(test)]
 mod test {
