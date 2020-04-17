@@ -202,6 +202,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomialsPrecomputatio
         let selector_q_const_index = setup.selector_polynomials.len()-2;
         for (i, p) in setup.selector_polynomials.iter().enumerate() {
             if i == selector_q_const_index{
+                // println!("skipipng const poly");
                 continue;
             }
             let ext = p.clone().bitreversed_lde_using_bitreversed_ntt(

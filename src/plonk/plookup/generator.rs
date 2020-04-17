@@ -21,6 +21,9 @@ pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
 
     num_inputs: usize,
     num_aux: usize,
+    num_lookups: usize,
+
+    lookup_table: Vec<(E::Fr, E::Fr, E::Fr)>,
 
     inputs_map: Vec<usize>,
 
@@ -107,6 +110,9 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
 
             num_inputs: 0,
             num_aux: 0,
+            num_lookups:0,
+
+            lookup_table: vec![],
 
             inputs_map: vec![],
 
@@ -125,6 +131,9 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
 
             num_inputs: 0,
             num_aux: 0,
+            num_lookups: 0,
+
+            lookup_table: vec![],
 
             inputs_map: Vec::with_capacity(num_inputs),
 
@@ -133,6 +142,29 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
 
         tmp
     }
+
+    pub fn new_with_lookup_table(table: Vec<(E::Fr,E::Fr,E::Fr)>) -> Self {
+        let tmp = Self {
+            n: 0,
+            m: 0,
+            input_gates: vec![],
+            aux_gates: vec![],
+
+            num_inputs: 0,
+            num_aux: 0,
+            num_lookups: 0,
+
+            lookup_table: table,
+
+            inputs_map: vec![],
+
+            is_finalized: false,
+        };
+
+        tmp
+    }
+
+
 
     // return variable that is not in a constraint formally, but has some value
     fn dummy_variable(&self) -> Variable {
@@ -148,30 +180,56 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
             return;
         }
 
-        let n = self.input_gates.len() + self.aux_gates.len();
+        let table_size = self.lookup_table.len();
+        let lookup_gates = self.num_lookups;
+        let filled_gates = self.n + self.num_inputs;
+        let n = filled_gates.max(table_size + lookup_gates);
+
         if (n+1).is_power_of_two() {
             self.is_finalized = true;
             return;
         }
 
-        let dummy = self.get_dummy_variable();
-
-        let vars = P::StateVariables::from_variable_and_padding(dummy, dummy);
-        let this_step_coeffs = P::ThisTraceStepCoefficients::empty();
-        let next_step_coeffs = P::NextTraceStepCoefficients::empty();
-
-        let empty_gate = (vars, this_step_coeffs, next_step_coeffs);
-
-        let new_aux_len = (n+1).next_power_of_two() - 1 - self.input_gates.len();
-
-        self.aux_gates.resize(new_aux_len, empty_gate);
-
-        let n = self.input_gates.len() + self.aux_gates.len();
-        assert!((n+1).is_power_of_two());
-        self.n = n;
+        for _ in (self.n+1)..(n+1).next_power_of_two(){
+            let variables = P::StateVariables::from_variables(&vec![self.get_dummy_variable();4]);            
+            self.new_gate(
+                variables, 
+                P::ThisTraceStepCoefficients::empty(), 
+                P::NextTraceStepCoefficients::empty(),
+            ).unwrap(); // TODO: change func signature to handle Result?
+        }
 
         self.is_finalized = true;
     }
+    // pub fn finalize(&mut self) {
+    //     if self.is_finalized {
+    //         return;
+    //     }
+
+    //     let n = self.input_gates.len() + self.aux_gates.len();
+    //     if (n+1).is_power_of_two() {
+    //         self.is_finalized = true;
+    //         return;
+    //     }
+
+    //     let dummy = self.get_dummy_variable();
+
+    //     let vars = P::StateVariables::from_variable_and_padding(dummy, dummy);
+    //     let this_step_coeffs = P::ThisTraceStepCoefficients::empty();
+    //     let next_step_coeffs = P::NextTraceStepCoefficients::empty();
+
+    //     let empty_gate = (vars, this_step_coeffs, next_step_coeffs);
+
+    //     let new_aux_len = (n+1).next_power_of_two() - 1 - self.input_gates.len();
+
+    //     self.aux_gates.resize(new_aux_len, empty_gate);
+
+    //     let n = self.input_gates.len() + self.aux_gates.len();
+    //     assert!((n+1).is_power_of_two());
+    //     self.n = n;
+
+    //     self.is_finalized = true;
+    // }
 }
 
 // later we can alias traits
@@ -272,7 +330,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let q_const = Polynomial::from_values(q_const)?;
         let q_lookup = Polynomial::from_values(q_lookup)?;
 
-        q_lookup.as_ref().iter().for_each(|e| println!("{}", e));
+        // q_lookup.as_ref().iter().for_each(|e| println!("{}", e));
 
         let q_d_next = Polynomial::from_values(q_d_next)?;
 
@@ -436,6 +494,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let q_d = q_d.ifft(&worker);
         let q_m = q_m.ifft(&worker);
         let q_const = q_const.ifft(&worker);
+        // q_lookup.as_ref().iter().for_each(|e| println!("{}", e));
         let q_lookup = q_lookup.ifft(&worker);
 
         let q_d_next = q_d_next.ifft(&worker);

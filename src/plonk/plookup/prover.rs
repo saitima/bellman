@@ -30,6 +30,7 @@ pub struct ProverAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
 
     num_inputs: usize,
     num_aux: usize,
+    num_lookups: usize,
 
     input_assingments: Vec<E::Fr>,
     aux_assingments: Vec<E::Fr>,
@@ -139,8 +140,9 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Pr
         self.wire_assignments[1].push(b_val);
         self.wire_assignments[2].push(c_val);
         self.wire_assignments[3].push(E::Fr::zero());
- 
+        // println!("n {}", self.n);
         self.n += 1;
+        self.num_lookups += 1;
         Ok(c)
     }
 }
@@ -153,6 +155,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
 
             num_inputs: 0,
             num_aux: 0,
+            num_lookups: 0,
 
             input_assingments: vec![],
             aux_assingments: vec![],
@@ -182,6 +185,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
 
             num_inputs: 0,
             num_aux: 0,
+            num_lookups: 0,
 
             input_assingments: Vec::with_capacity(num_inputs),
             aux_assingments: Vec::with_capacity(num_aux),
@@ -210,6 +214,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
             m: 0,
             num_inputs: 0,
             num_aux: 0,
+            num_lookups: 0,
             input_assingments: vec![],
             aux_assingments: vec![],
             wire_assignments: vec![vec![]; P::STATE_WIDTH],
@@ -238,24 +243,38 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
         if self.is_finalized {
             return;
         }
+        let table_size = self.lookup_table.len();
+        let lookup_gates = self.num_lookups;
+        let filled_gates = self.n + self.num_inputs;
+        let n = filled_gates.max(table_size + lookup_gates);
 
-        let n = self.n;
         if (n+1).is_power_of_two() {
             self.is_finalized = true;
             return;
         }
 
-        self.n = (n+1).next_power_of_two() - 1;
+        for _ in (self.n+1)..(n+1).next_power_of_two(){
+            let variables = P::StateVariables::from_variables(&vec![self.get_dummy_variable();4]);            
+            self.new_gate(
+                variables, 
+                P::ThisTraceStepCoefficients::empty(), 
+                P::NextTraceStepCoefficients::empty(),
+            ).unwrap(); // TODO: change func signature to handle Result?
+        }
 
         self.is_finalized = true;
     }
 
     pub fn find_value_in_table(&self, a: E::Fr, b: E::Fr) -> Result<E::Fr, SynthesisError>{        
-        let (_, _, c) = self.lookup_table.iter().find(|(col1, col2, _)| *col1 == a && *col2 == b ).expect("table must have");
+        // TODO: c =
+        let (_, _, c) = self.lookup_table.iter().find(|(col1, col2, _)| (*col1 == a && *col2 == b ) || (*col1 == b && *col2 == a ) ).expect("table must have");
 
         Ok(*c)
     }
 
+    pub fn get_lookup_table(self) -> Vec<(E::Fr, E::Fr, E::Fr)>{
+        self.lookup_table
+    }
     pub fn make_witness_polynomials(
         self
     ) -> Result<Vec<Vec<E::Fr>>, SynthesisError>
@@ -285,6 +304,102 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
     }
 }
 
+use std::cmp::Ordering;
+#[derive(Debug, Clone)]
+pub struct MultiSet<E: Engine>([E::Fr; 3]);
+impl<E: Engine> MultiSet<E>{
+    pub fn new()-> Self{
+        Self([E::Fr::zero();3])
+    }
+    pub fn from_vec(vec: [E::Fr;3])-> Self{
+        Self(vec)
+    }
+
+    pub fn scale_and_sum(&mut self , s: E::Fr) -> E::Fr{
+        let mut scalar = s;
+        let mut sum = E::Fr::zero();
+        for i in 0..self.0.len(){
+            let mut tmp = self.0[i];
+            tmp.mul_assign(&scalar);
+            sum.add_assign(&tmp);
+            scalar.mul_assign(&s);
+        }
+        sum
+    }
+}
+impl<E: Engine> PartialEq for MultiSet<E>{
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0[0] == other.0[0] && self.0[1] == other.0[1] && self.0[2] == other.0[2]
+    }
+}
+
+impl<E: Engine> Eq for MultiSet<E>{}
+
+impl<E: Engine> PartialOrd for MultiSet<E>{
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let s0 = self.0[0].into_repr();
+        let s1 = self.0[1].into_repr();
+        let s2 = self.0[2].into_repr();
+        
+        let o0 = other.0[0].into_repr();
+        let o1 = other.0[1].into_repr();
+        let o2 = other.0[2].into_repr();
+
+        if s1 == o1 {
+            if s0 == o0 {
+                if s2 < o2{
+                    Some(Ordering::Less)
+                }else{
+                    Some(Ordering::Greater)
+                }
+            }else if s0 < o0 {
+                Some(Ordering::Less)
+            }else{
+                Some(Ordering::Greater)
+            }
+        }else if s1 < o1{
+            Some(Ordering::Less)
+        }else{
+            Some(Ordering::Greater)
+        }
+    }
+}
+
+impl<E: Engine> Ord for MultiSet<E>{
+    fn cmp(&self, other: &Self) -> Ordering {
+        let s0 = self.0[0].into_repr();
+        let s1 = self.0[1].into_repr();
+        let s2 = self.0[2].into_repr();
+        
+        let o0 = other.0[0].into_repr();
+        let o1 = other.0[1].into_repr();
+        let o2 = other.0[2].into_repr();
+
+        if s1 == o1 {
+            if s0 == o0 {
+                if s2 < o2{
+                    Ordering::Less
+                }else{
+                    Ordering::Greater
+                }
+            }else if s0 < o0 {
+              Ordering::Less  
+            }else{
+                Ordering::Greater
+            }
+        }else if s1 < o1{
+            Ordering::Less
+        }else{
+            Ordering::Greater
+        }
+    }
+}
+
+
+
+
 // later we can alias traits
 // pub trait PlonkCsWidth3WithNextStep<E: Engine> = ConstraintSystem<E, PlonkCsWidth3WithNextStepParams>;
 
@@ -309,7 +424,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         assert!(self.is_finalized);
 
-        let input_values = self.input_assingments.clone();
+        let input_values = self.input_assingments.clone();        
 
         for inp in input_values.iter() {
             transcript.commit_field_element(inp);
@@ -317,9 +432,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         let n = self.n;
         let num_inputs = self.num_inputs;
-
+        
         let required_domain_size = n + 1;
         assert!(required_domain_size.is_power_of_two());
+
+        let lookup_table = self.lookup_table.clone();
 
         let full_assignments = self.make_witness_polynomials()?;
 
@@ -349,7 +466,9 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         // now transform assignments in the polynomials
 
         let mut assignment_polynomials = vec![];
-        for p in full_assignments.into_iter() {
+        
+        // @TODO:
+        for p in full_assignments.clone().into_iter() {
             let p = Polynomial::from_values_unpadded(p)?;
             assignment_polynomials.push(p);
         }
@@ -489,12 +608,54 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             witness_ldes_on_coset.push(lde);
         }
 
+
+        // PLOOKUP         
+        let lookup_poly_index = setup.selector_polynomials.len() -1;
+        let lookup_poly = setup.selector_polynomials[lookup_poly_index].clone();
+        
+        // construct s = (f,t) sorted by t
+        let mut s_vec: Vec<MultiSet<E>> = Vec::new();    
+        for i in 0..full_assignments[0].len(){
+            if lookup_poly.as_ref()[i] == E::Fr::one(){
+                s_vec.push(MultiSet::from_vec([full_assignments[0][i], full_assignments[1][i], full_assignments[2][i]]));
+            }
+        }
+        for i in 0..lookup_table.len(){
+            s_vec.push(MultiSet::from_vec([lookup_table[i].0, lookup_table[i].1, lookup_table[i].2]));
+        }
+
+        // sort s based on multiset
+        s_vec.sort();
+
+        // allocate s 
+        let size_s = required_domain_size - s_vec.len();
+        let mut s: Vec<E::Fr> = vec![E::Fr::zero();required_domain_size];
+        
+        // use this challenge until there will be enough entropy to put in transcript
+        let kappa = E::Fr::one();
+        let mut j = 0;
+        for i in size_s..required_domain_size{
+            // scale
+            s[i] = s_vec[j].scale_and_sum(kappa);
+            j += 1;
+        }
+
+        
+        // f(x) = (a(x) + b(x)*kappa + c(x)*kappa^2) * q_lookup(x)
+        
+        // t(x) = t_1(x) + t_2(x)*kappa + t_3(x)* kappa^2 
+
+        //                      (\beta + 1)^i * \prod_{j < i}(\gamma + f_j) * \prod_{1 <= j < i}(\gamma(1 + \beta} + t_j + \beta * t_{j+1})
+        // Z_{i + 1} =  Z_i *    ___________________________________________________________________________________________________
+        //                                   \prod_{1 <= j < i}(\gamma(1 + \beta) + s_j + \beta * s_{j+1})
+
+
         let alpha = transcript.get_challenge();
 
         // calculate first part of the quotient polynomial - the gate itself
         // A + B + C + D + AB + CONST + D_NEXT == 0 everywhere but on the last point of the domain
         
-        // after introducing new selector constant is shifted one step to the left
+        // after introducing new lookup selector, constant selector is shifted one step to the left
         let selector_q_const_index = setup.selector_polynomials.len()-2;
         
         let mut quotient_linearization_challenge = E::Fr::one();
@@ -990,8 +1151,8 @@ mod test {
             let  one = E::Fr::one();
             let mut neg_one = E::Fr::one();
             neg_one.negate();
-            for i in 1..2{
-                for j in 3..4{
+            for i in 0..2{
+                for j in 0..2{
                     let left_val = E::Fr::from_str(&j.to_string()).unwrap();
                     let right_val = E::Fr::from_str(&i.to_string()).unwrap();
 
@@ -1019,28 +1180,7 @@ mod test {
                         [one, one, one, neg_one, zero, zero, zero],
                         [zero]
                     )?;
-                    
-                    let out_val = E::Fr::from_str(&(j+i).to_string()).unwrap();
-                    let out = cs.alloc(||{
-                        Ok(out_val)
-                    })?;
 
-                    // healthy gates
-                    cs.new_gate(
-                        [left, right, out, cs.get_dummy_variable()], 
-                        [zero, zero, zero, zero, zero ,zero ,one], 
-                        [zero]
-                    )?;
-                    cs.new_gate(
-                        [left, right, out, cs.get_dummy_variable()], 
-                        [one, one, neg_one, zero, zero ,zero ,zero], 
-                        [zero]
-                    )?;
-                    cs.new_gate(
-                        [left, right, out, cs.get_dummy_variable()], 
-                        [one, one, neg_one, zero, zero ,zero ,zero], 
-                        [zero]
-                    )?;
                 }
             }
 
@@ -1055,7 +1195,20 @@ mod test {
         use crate::plonk::plookup::generator::*;
         use crate::plonk::plookup::keys::*;
 
-        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256>::new();
+        let size = 256;
+        let bit_size = 4;
+        let mut table = vec![];
+        for i in 0..bit_size{
+            for j in 0..bit_size{
+                let k = i ^ j;
+                let a = Fr::from_str(&j.to_string()).unwrap();
+                let b = Fr::from_str(&i.to_string()).unwrap();
+                let c = Fr::from_str(&k.to_string()).unwrap();
+                table.push((a,b,c));
+            }
+        }
+
+        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256>::new_with_lookup_table(table.clone());
 
         let circuit = TestCircuit4::<Bn256> {
             _marker: PhantomData
@@ -1087,34 +1240,14 @@ mod test {
             &worker
         ).unwrap();
 
-        let size = 256;
-        let bit_size = 16;
-        let mut table = vec![];
-        for i in 0..bit_size{
-            for j in 0..bit_size{
-                let k = i ^ j;
-                let a = Fr::from_str(&i.to_string()).unwrap();
-                let b = Fr::from_str(&j.to_string()).unwrap();
-                let c = Fr::from_str(&k.to_string()).unwrap();
-                table.push((a,b,c));
-            }
-        }
+       
 
         let mut assembly = ProverAssembly4WithNextStep::<Bn256>::new_with_lookup_table(table);
 
         circuit.clone().synthesize(&mut assembly).expect("must work");
 
         assembly.finalize();
-        // let three  = Fr::from_str("3").expect("must fe");
-        // let four  = Fr::from_str("4").expect("must fe");
-        // let seven  = Fr::from_str("7").expect("must fe");
-
-        // let wire_len = assembly.wire_assignments[0].len()-1;
-        // assert_eq!(assembly.wire_assignments[0][wire_len], three);
-        // assert_eq!(assembly.wire_assignments[1][wire_len], four);
-        // assert_eq!(assembly.wire_assignments[2][wire_len], seven);
-        // println!("xor value {} read from table ", seven);
-
+    
         let size = setup.permutation_polynomials[0].size();
 
         type Transcr = Blake2sTranscript<Fr>;
@@ -1136,5 +1269,30 @@ mod test {
 
         assert!(is_valid);
 
+        assert!(Fr::zero() < Fr::one());
+
     }
+
+    #[test]
+    fn test_multiset_sort(){
+        use crate::pairing::bn256::{Bn256, Fr};
+        use super::MultiSet;
+        let one = Fr::one();
+        let mut two = one.clone();
+        two.double();
+        let mut three = two.clone();
+        three.add_assign(&one);
+
+        let m0 = MultiSet::<Bn256>([three, two, three]);
+        let m1 = MultiSet::<Bn256>([three, two, three]);
+        let m2 = MultiSet::<Bn256>([three, two, one]);
+        let m3 = MultiSet::<Bn256>([two, two, three]);
+
+        assert_ne!(m1, m2);
+        assert_eq!(m0, m1);
+
+        assert!(m1 > m2);
+        assert!(m2 < m3);
+        assert!(m1 > m3);
+    }    
 }
