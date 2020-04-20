@@ -315,18 +315,21 @@ impl<E: Engine> MultiSet<E>{
         Self(vec)
     }
 
-    pub fn scale_and_sum(&mut self , s: E::Fr) -> E::Fr{
-        let mut scalar = s;
+    pub fn scale_and_sum(&self , s: E::Fr) -> E::Fr{
+        let mut scalar = E::Fr::one();
         let mut sum = E::Fr::zero();
-        for i in 0..self.0.len(){
-            let mut tmp = self.0[i];
+
+        self.0.iter().for_each(|e| {
+            let mut tmp = e.clone();
             tmp.mul_assign(&scalar);
             sum.add_assign(&tmp);
             scalar.mul_assign(&s);
-        }
+        }); 
+
         sum
     }
 }
+
 impl<E: Engine> PartialEq for MultiSet<E>{
     #[inline]
     fn eq(&self, other: &Self) -> bool {
@@ -341,29 +344,39 @@ impl<E: Engine> PartialOrd for MultiSet<E>{
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let s0 = self.0[0].into_repr();
         let s1 = self.0[1].into_repr();
-        let s2 = self.0[2].into_repr();
         
         let o0 = other.0[0].into_repr();
         let o1 = other.0[1].into_repr();
-        let o2 = other.0[2].into_repr();
 
-        if s1 == o1 {
-            if s0 == o0 {
-                if s2 < o2{
-                    Some(Ordering::Less)
-                }else{
-                    Some(Ordering::Greater)
-                }
-            }else if s0 < o0 {
-                Some(Ordering::Less)
-            }else{
-                Some(Ordering::Greater)
+        if s0 == o0{
+            if s1 < o1{
+                return Some(Ordering::Less)
             }
-        }else if s1 < o1{
+            Some(Ordering::Greater)
+        }else if s0 < o0{
             Some(Ordering::Less)
         }else{
             Some(Ordering::Greater)
         }
+
+    //     if s1 == o1 {
+    //         if s0 == o0 {
+    //             if s2 < o2{
+    //                 Some(Ordering::Less)
+    //             }else{
+    //                 Some(Ordering::Greater)
+    //             }
+    //         }else if s0 < o0 {
+    //             Some(Ordering::Less)
+    //         }else{
+    //             Some(Ordering::Greater)
+    //         }
+    //     }else if s1 < o1{
+    //         Some(Ordering::Less)
+    //     }else{
+    //         Some(Ordering::Greater)
+    //     }
+    // }
     }
 }
 
@@ -371,29 +384,39 @@ impl<E: Engine> Ord for MultiSet<E>{
     fn cmp(&self, other: &Self) -> Ordering {
         let s0 = self.0[0].into_repr();
         let s1 = self.0[1].into_repr();
-        let s2 = self.0[2].into_repr();
+
         
         let o0 = other.0[0].into_repr();
         let o1 = other.0[1].into_repr();
-        let o2 = other.0[2].into_repr();
 
-        if s1 == o1 {
-            if s0 == o0 {
-                if s2 < o2{
-                    Ordering::Less
-                }else{
-                    Ordering::Greater
-                }
-            }else if s0 < o0 {
-              Ordering::Less  
-            }else{
-                Ordering::Greater
+
+        if s0 == o0{
+            if s1 < o1{
+                return Ordering::Less
             }
-        }else if s1 < o1{
+            Ordering::Greater
+        }else if s0 < o0{
             Ordering::Less
         }else{
             Ordering::Greater
         }
+        // if s1 == o1 {
+        //     if s0 == o0 {
+        //         if s2 < o2{
+        //             Ordering::Less
+        //         }else{
+        //             Ordering::Greater
+        //         }
+        //     }else if s0 < o0 {
+        //       Ordering::Less  
+        //     }else{
+        //         Ordering::Greater
+        //     }
+        // }else if s1 < o1{
+        //     Ordering::Less
+        // }else{
+        //     Ordering::Greater
+        // }
     }
 }
 
@@ -437,6 +460,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         assert!(required_domain_size.is_power_of_two());
 
         let lookup_table = self.lookup_table.clone();
+        let num_lookup_gates = self.num_lookups;
 
         let full_assignments = self.make_witness_polynomials()?;
 
@@ -580,7 +604,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         let mut witness_ldes_on_coset = vec![];
         let mut witness_next_ldes_on_coset = vec![];
 
-        for (idx, w) in assignment_polynomials.into_iter().enumerate() {
+        for (idx, w) in assignment_polynomials.clone().into_iter().enumerate() {
             let monomial = w.clone_padded_to_domain()?.ifft_using_bitreversed_ntt(&worker, omegas_inv_bitreversed, &E::Fr::one())?;
             witness_polys_in_monomial_form.push(monomial.clone());
 
@@ -610,44 +634,215 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
 
         // PLOOKUP         
-        let lookup_poly_index = setup.selector_polynomials.len() -1;
-        let lookup_poly = setup.selector_polynomials[lookup_poly_index].clone();
         
-        // construct s = (f,t) sorted by t
-        let mut s_vec: Vec<MultiSet<E>> = Vec::new();    
-        for i in 0..full_assignments[0].len(){
-            if lookup_poly.as_ref()[i] == E::Fr::one(){
-                s_vec.push(MultiSet::from_vec([full_assignments[0][i], full_assignments[1][i], full_assignments[2][i]]));
-            }
-        }
-        for i in 0..lookup_table.len(){
-            s_vec.push(MultiSet::from_vec([lookup_table[i].0, lookup_table[i].1, lookup_table[i].2]));
-        }
+        let new_domain_size = required_domain_size*4;
 
-        // sort s based on multiset
-        s_vec.sort();
+        let lookup_selector_poly_index = setup.selector_polynomials.len() -1;
+        let lookup_selector_poly = setup.selector_polynomials[lookup_selector_poly_index].clone();
+        let lookup_selector_poly = lookup_selector_poly.fft(worker);        
 
-        // allocate s 
-        let size_s = required_domain_size - s_vec.len();
-        let mut s: Vec<E::Fr> = vec![E::Fr::zero();required_domain_size];
-        
         // use this challenge until there will be enough entropy to put in transcript
-        let kappa = E::Fr::one();
-        let mut j = 0;
-        for i in size_s..required_domain_size{
-            // scale
-            s[i] = s_vec[j].scale_and_sum(kappa);
-            j += 1;
-        }
+        let plookup_challenge = E::Fr::from_str("42").unwrap();
+        let mut plookup_challenge_square = plookup_challenge.clone();
+        plookup_challenge_square.mul_assign(&plookup_challenge);
 
-        
-        // f(x) = (a(x) + b(x)*kappa + c(x)*kappa^2) * q_lookup(x)
-        
-        // t(x) = t_1(x) + t_2(x)*kappa + t_3(x)* kappa^2 
+        let mut beta_one = beta.clone();
+        beta_one.add_assign(&E::Fr::one());
 
-        //                      (\beta + 1)^i * \prod_{j < i}(\gamma + f_j) * \prod_{1 <= j < i}(\gamma(1 + \beta} + t_j + \beta * t_{j+1})
+        let mut gamma_beta_one = beta_one.clone();
+        gamma_beta_one.mul_assign(&gamma);
+
+        let gamma_beta_one_poly = Polynomial::from_values(vec![gamma_beta_one; new_domain_size])?;
+
+        let (s_poly, shifted_s_poly) = {
+            let count = required_domain_size - num_lookup_gates - lookup_table.len();
+            // construct s = (f,t) sorted by t
+            let mut s_vec: Vec<MultiSet<E>> = Vec::new();    
+            for _ in 0..count{
+                s_vec.push(MultiSet::new());
+            }        
+            for i in 0..full_assignments[0].len(){
+                if lookup_selector_poly.as_ref()[i] == E::Fr::one(){
+                    s_vec.push(MultiSet::from_vec([full_assignments[0][i], full_assignments[1][i], full_assignments[2][i]]));
+                }
+            }
+
+            for i in 0..lookup_table.len(){
+                s_vec.push(MultiSet::from_vec([lookup_table[i].0, lookup_table[i].1, lookup_table[i].2]));
+            }
+
+            // sort s based on multiset
+            s_vec.sort();
+
+            let s: Vec<E::Fr >= s_vec.iter().map(|m| m.scale_and_sum(plookup_challenge)).collect();
+
+            let s = Polynomial::from_values(s)?;
+            let factor = ((new_domain_size / s.size()) as usize).next_power_of_two();
+            let s = s.ifft(worker);                
+            let omega = s.omega.clone();
+            let mut shifted_s  = s.clone();
+            shifted_s.distribute_powers(&worker, omega);
+            let s = s.lde(worker,factor)?;
+            let shifted_s = shifted_s.lde(worker, factor)?;
+            (s, shifted_s)
+        };
+
+        let witness_poly = {
+            // f(x) = (a(x) + b(x)*plookup_challenge + c(x)*plookup_challenge^2) * q_lookup(x)
+            let mut witness_poly = assignment_polynomials[0].clone();
+            let mut bx = assignment_polynomials[1].clone();
+            bx.scale(&worker, plookup_challenge);
+            witness_poly.add_assign(&worker, &bx);
+            let mut cx= assignment_polynomials[2].clone();
+            cx.scale(&worker, plookup_challenge_square);
+            witness_poly.add_assign(&worker, &cx);
+
+
+            let witness_poly = witness_poly.clone_padded_to_domain()?;
+            let factor = ((new_domain_size / witness_poly.size()) as usize).next_power_of_two();
+            let mut witness_poly = witness_poly.ifft(worker).lde(worker, factor)?;            
+
+            let lookup_poly = lookup_selector_poly.ifft(worker).lde(worker, factor)?;
+            witness_poly.mul_assign(&worker, &lookup_poly);
+            
+            witness_poly
+        };
+
+
+        let (table_poly, shifted_table_poly) = {
+            // t(x) = t_1(x) + t_2(x)*plookup_challenge + t_3(x)* plookup_challenge^2 
+            let mut t1_values = vec![];
+            let mut t2_values = vec![];
+            let mut t3_values = vec![];
+            for i in 0..lookup_table.len(){
+                t1_values.push(lookup_table[i].0);
+                t2_values.push(lookup_table[i].1);
+                t3_values.push(lookup_table[i].2);
+            }
+
+            let t1 = Polynomial::from_values(t1_values)?;
+            let mut t2 = Polynomial::from_values(t2_values)?;
+            let mut t3 = Polynomial::from_values(t3_values)?;
+
+            let mut table_poly = t1.clone();
+            t2.scale(&worker, plookup_challenge);
+            table_poly.add_assign(&worker, &t2);
+            t3.scale(&worker, plookup_challenge_square);
+            table_poly.add_assign(&worker, &t3);
+
+            let factor = ((new_domain_size / table_poly.size()) as usize).next_power_of_two();
+            let omega = table_poly.omega.clone();
+            let table_poly = table_poly.ifft(worker);
+            let mut shifted_table_poly = table_poly.clone();
+            shifted_table_poly.distribute_powers(&worker, omega);
+            let table_poly = table_poly.lde(worker, factor)?;
+            let shifted_table_poly = shifted_table_poly.lde(&worker, factor)?;
+            
+            (table_poly,shifted_table_poly)
+        };
+        
+        //                      (\beta + 1)^i * (gamma + f_0)^i * \prod_{1<j < i}(\gamma + f_j) * \prod_{1 <= j < i}(\gamma(1 + \beta} + t_j + \beta * t_{j+1})
         // Z_{i + 1} =  Z_i *    ___________________________________________________________________________________________________
         //                                   \prod_{1 <= j < i}(\gamma(1 + \beta) + s_j + \beta * s_{j+1})
+        //                                                                              n
+        
+        let mut plookup_num = {        
+            let gamma_poly = Polynomial::from_values(vec![gamma; new_domain_size])?;
+            let mut num = witness_poly.clone();
+            num.add_assign(&worker, &gamma_poly);    
+            let mut shifted_table_poly = shifted_table_poly.clone();
+            shifted_table_poly.scale(&worker, beta);
+            shifted_table_poly.add_assign(&worker, &table_poly);
+            shifted_table_poly.add_assign(&worker, &gamma_beta_one_poly);
+            num.mul_assign(&worker, &shifted_table_poly);
+            
+            // n power of beta+1
+            let mut beta_one_poly = Polynomial::from_coeffs(vec![E::Fr::one(); required_domain_size])?;
+            beta_one_poly.distribute_powers(&worker, beta_one);
+            let factor = ((new_domain_size / beta_one_poly.size()) as usize).next_power_of_two();
+            let beta_one_poly = beta_one_poly.lde(&worker, factor)?;
+            num.mul_assign(&worker, &beta_one_poly);
+            
+            num
+        };
+
+        let plookup_den = {
+            let mut den = shifted_s_poly.clone();
+            den.scale(&worker, beta);
+            den.add_assign(&worker, &s_poly);
+            den.add_assign(&worker, &gamma_beta_one_poly);
+            den.batch_inversion(&worker)?;
+
+            den
+        };
+
+        plookup_num.mul_assign(&worker, &plookup_den);
+
+        let plookup_z = plookup_num.calculate_grand_product(&worker)?;        
+        // let actual = plookup_z.clone().ifft(&worker);
+        // let actual = actual.as_ref()[required_domain_size-1].clone();
+        // let expected = gamma_beta_one.pow([(required_domain_size-1) as u64]);
+        // assert_eq!(actual, expected);
+
+
+        {
+            // sanity checks
+            // z_{i+1} = z_i * (1 + beta) * f(beta, gamma) / g(beta, gamma)
+            // z1:)
+
+            // z1 = z0 * (1+ß)*f0/g0
+            let f = witness_poly.as_ref().clone();
+            let t = table_poly.as_ref().clone();
+            let s = s_poly.as_ref().clone();
+
+
+            let z0 = E::Fr::one();
+
+            let mut z1_num =  t[1].clone();
+            z1_num.mul_assign(&beta);
+            z1_num.add_assign(&t[0]);
+            z1_num.add_assign(&gamma_beta_one);
+
+            let mut tmp = f[0].clone();
+            tmp.add_assign(&gamma);
+            z1_num.mul_assign(&tmp);
+
+            let mut z1_den = s[1].clone();
+            z1_den.mul_assign(&beta);
+            z1_den.add_assign(&s[0].clone());
+            z1_den.add_assign(&gamma_beta_one);
+            z1_den.inverse().expect("should has inverse");        
+            
+            let mut z1 = z0.clone();
+            z1.mul_assign(&z1_num);
+            z1.mul_assign(&z1_den);
+            z1.mul_assign(&beta_one);
+
+
+            // z2 = z1 * (1+ß)*f1/g1
+            let mut z2_num =  t[2].clone();
+            z2_num.mul_assign(&beta);
+            z2_num.add_assign(&t[1]);
+            z2_num.add_assign(&gamma_beta_one);
+
+            let mut tmp = f[2].clone();
+            tmp.add_assign(&gamma);
+            z2_num.mul_assign(&tmp);            
+
+            let mut z2_den = s[2].clone();
+            z2_den.mul_assign(&beta);
+            z2_den.add_assign(&s[1].clone());
+            z2_den.add_assign(&gamma_beta_one);
+            z2_den.inverse().expect("should has inverse");
+            let mut z2 = z1.clone();
+            z2.mul_assign(&z2_num);
+            z2.mul_assign(&z2_den);
+            z2.mul_assign(&beta_one);
+
+            println!("z1 {} z2 {}", z1, z2);
+            // assert_eq!(z2, plookup_z.as_ref()[2]);
+        }
+
 
 
         let alpha = transcript.get_challenge();
@@ -1196,7 +1391,7 @@ mod test {
         use crate::plonk::plookup::keys::*;
 
         let size = 256;
-        let bit_size = 4;
+        let bit_size = 2;
         let mut table = vec![];
         for i in 0..bit_size{
             for j in 0..bit_size{
@@ -1294,5 +1489,31 @@ mod test {
         assert!(m1 > m2);
         assert!(m2 < m3);
         assert!(m1 > m3);
-    }    
+    }  
+    
+    #[test]
+    fn test_plonk_shifted_poly(){
+        use crate::plonk::polynomials::{Polynomial, Values};
+        use crate::multicore::Worker;
+        use crate::pairing::bls12_381::{Bls12, Fr};
+
+        let one = Fr::from_str("1").unwrap();
+        let two = Fr::from_str("2").unwrap();
+        let three = Fr::from_str("3").unwrap();
+        let four = Fr::from_str("4").unwrap();
+
+        let worker = Worker::new();
+
+        let p = Polynomial::from_values(vec![one, two, three, four]).unwrap();
+
+        let p_poly = p.clone().ifft(&worker);
+
+        let mut generator = p.omegainv.clone();
+        generator.mul_assign(&p.omegainv);
+        let mut shifted = p.clone().ifft(&worker);
+        shifted.distribute_powers(&worker, generator);
+        let shifted = shifted.fft(&worker);
+        shifted.as_ref().iter().for_each(|e| println!("{}", e));
+    
+    }
 }
