@@ -756,11 +756,10 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             shifted_table_poly.add_assign(&worker, &gamma_beta_one_poly);
             num.mul_assign(&worker, &shifted_table_poly);
             
-            // n power of beta+1
-            let mut beta_one_poly = Polynomial::from_coeffs(vec![E::Fr::one(); required_domain_size])?;
+            // n th power of beta+1
+            let mut beta_one_poly = Polynomial::from_values(vec![E::Fr::one(); new_domain_size])?;
             beta_one_poly.distribute_powers(&worker, beta_one);
-            let factor = ((new_domain_size / beta_one_poly.size()) as usize).next_power_of_two();
-            let beta_one_poly = beta_one_poly.lde(&worker, factor)?;
+
             num.mul_assign(&worker, &beta_one_poly);
             
             num
@@ -778,71 +777,38 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         plookup_num.mul_assign(&worker, &plookup_den);
 
-        let plookup_z = plookup_num.calculate_grand_product(&worker)?;        
-        // let actual = plookup_z.clone().ifft(&worker);
-        // let actual = actual.as_ref()[required_domain_size-1].clone();
-        // let expected = gamma_beta_one.pow([(required_domain_size-1) as u64]);
-        // assert_eq!(actual, expected);
-
-
         {
-            // sanity checks
-            // z_{i+1} = z_i * (1 + beta) * f(beta, gamma) / g(beta, gamma)
-            // z1:)
-
-            // z1 = z0 * (1+ß)*f0/g0
-            let f = witness_poly.as_ref().clone();
-            let t = table_poly.as_ref().clone();
-            let s = s_poly.as_ref().clone();
-
-
-            let z0 = E::Fr::one();
-
-            let mut z1_num =  t[1].clone();
-            z1_num.mul_assign(&beta);
-            z1_num.add_assign(&t[0]);
-            z1_num.add_assign(&gamma_beta_one);
-
-            let mut tmp = f[0].clone();
-            tmp.add_assign(&gamma);
-            z1_num.mul_assign(&tmp);
-
-            let mut z1_den = s[1].clone();
-            z1_den.mul_assign(&beta);
-            z1_den.add_assign(&s[0].clone());
-            z1_den.add_assign(&gamma_beta_one);
-            z1_den.inverse().expect("should has inverse");        
-            
-            let mut z1 = z0.clone();
-            z1.mul_assign(&z1_num);
-            z1.mul_assign(&z1_den);
-            z1.mul_assign(&beta_one);
-
-
-            // z2 = z1 * (1+ß)*f1/g1
-            let mut z2_num =  t[2].clone();
-            z2_num.mul_assign(&beta);
-            z2_num.add_assign(&t[1]);
-            z2_num.add_assign(&gamma_beta_one);
-
-            let mut tmp = f[2].clone();
-            tmp.add_assign(&gamma);
-            z2_num.mul_assign(&tmp);            
-
-            let mut z2_den = s[2].clone();
-            z2_den.mul_assign(&beta);
-            z2_den.add_assign(&s[1].clone());
-            z2_den.add_assign(&gamma_beta_one);
-            z2_den.inverse().expect("should has inverse");
-            let mut z2 = z1.clone();
-            z2.mul_assign(&z2_num);
-            z2.mul_assign(&z2_den);
-            z2.mul_assign(&beta_one);
-
-            println!("z1 {} z2 {}", z1, z2);
-            // assert_eq!(z2, plookup_z.as_ref()[2]);
+            let plookup_z_shifted = plookup_num.calculate_shifted_grand_product(&worker)?;        
+            let plookup_z_shifted_poly = plookup_z_shifted.clone().ifft(&worker); 
+            let plookup_z = plookup_num.calculate_grand_product(&worker)?;       
+            let plookup_z_poly = plookup_z.clone().ifft(&worker); 
+            // let actual = plookup_z.clone().ifft(&worker);
+            // let actual = actual.as_ref()[required_domain_size-1].clone();
+            // let expected = gamma_beta_one.pow([(required_domain_size-1) as u64]);
+            // assert_eq!(actual, expected);
+            println!("domain size : {}", required_domain_size);
+            for i in 1..=required_domain_size{
+                let expected = gamma_beta_one.pow([i as u64]);
+                match plookup_z_shifted.as_ref().iter().find(|e| **e == expected){
+                    Some(_) => println!("found in first {}", i),
+                    _ => (),
+                }
+                match plookup_z.as_ref().iter().find(|e| **e == expected){
+                    Some(_) => println!("found in second {}", i),
+                    _ => (),
+                }
+                match plookup_z_poly.as_ref().iter().find(|e| **e == expected){
+                    Some(_) => println!("found in third {}", i),
+                    _ => (),
+                }
+                match plookup_z_shifted_poly.as_ref().iter().find(|e| **e == expected){
+                    Some(_) => println!("found in fourth {}", i),
+                    _ => (),
+                }
+            }
         }
 
+        
 
 
         let alpha = transcript.get_challenge();
@@ -1515,5 +1481,120 @@ mod test {
         let shifted = shifted.fft(&worker);
         shifted.as_ref().iter().for_each(|e| println!("{}", e));
     
+    }
+
+    #[test]
+    fn test_plookup_manually(){
+        use crate::plonk::polynomials::{Polynomial, Values};
+        use crate::multicore::Worker;
+        use crate::pairing::bls12_381::{Bls12, Fr};
+
+        let zero = Fr::zero();
+        let one = Fr::one();
+        let two = Fr::from_str("2").unwrap();
+        let three = Fr::from_str("3").unwrap();
+
+        // lookup gate selectors
+        let gs0 = Fr::one();
+        let gs1 = Fr::one();
+        let gs2 = Fr::one();
+
+        let lookup_selectors = vec![gs0, gs1, gs2];
+
+        // lookup gate assignments
+        let g0 = MultiSet::<Bls12>::from_vec([one, two, three]);        // 1 ^ 2 = 3
+        let g1 = MultiSet::<Bls12>::from_vec([one, three, two]);        // 1 ^ 3 = 2
+        let g2 = MultiSet::<Bls12>::from_vec([two, three, one]);        // 2 ^ 3 = 1
+        // let g3 = MultiSet::<Bls12>::from_vec([three, one, two]);        // 3 ^ 1 = 2
+
+        let lookup_gates = vec![g0, g1, g2];
+
+        // table elements
+        // let t00 = MultiSet::<Bls12>::from_vec([zero, zero, zero]);      // 0 ^ 0 = 0
+        // let t10 = MultiSet::<Bls12>::from_vec([one, zero, one]);        // 1 ^ 0 = 1
+        // let t20 = MultiSet::<Bls12>::from_vec([two, zero, two]);        // 2 ^ 0 = 2
+        // let t30 = MultiSet::<Bls12>::from_vec([three, zero, three]);    // 3 ^ 0 = 3
+
+        let t01 = MultiSet::<Bls12>::from_vec([zero, one, one]);        // 0 ^ 1 = 1
+        let t11 = MultiSet::<Bls12>::from_vec([one, one, zero]);        // 1 ^ 1 = 0
+        let t21 = MultiSet::<Bls12>::from_vec([two, one, three]);       // 2 ^ 1 = 3
+        let t31 = MultiSet::<Bls12>::from_vec([three, one, two]);       // 3 ^ 1 = 2
+
+        let t02 = MultiSet::<Bls12>::from_vec([zero, two, two]);        // 0 ^ 2 = 2
+        let t12 = MultiSet::<Bls12>::from_vec([one, two, three]);       // 1 ^ 2 = 3
+        let t22 = MultiSet::<Bls12>::from_vec([two, two, zero]);        // 2 ^ 2 = 0
+        let t32 = MultiSet::<Bls12>::from_vec([three, two, one]);       // 3 ^ 2 = 1
+
+        let t03 = MultiSet::<Bls12>::from_vec([zero, three, three]);    // 0 ^ 3 = 3
+        let t13 = MultiSet::<Bls12>::from_vec([one, three, two]);       // 1 ^ 3 = 2
+        let t23 = MultiSet::<Bls12>::from_vec([two, three, one]);       // 2 ^ 3 = 1
+        let t33 = MultiSet::<Bls12>::from_vec([three, three, zero]);    // 3 ^ 3 = 0
+
+        let  table_rows = vec![t01, t11, t21,t31, t02,t12,t22,t32, t03, t13,t23,t33];
+
+        let n = lookup_gates.len() + table_rows.len();
+        assert_eq!(n, 15);
+
+        // challenges
+        let beta = Fr::from_str("37").unwrap();
+        let gamma = Fr::from_str("43").unwrap();
+        let kappa = Fr::from_str("42").unwrap();
+
+        // construct s
+        let mut s_agg = vec![Fr::zero()];
+        lookup_gates.iter().chain(table_rows.iter()).for_each(|m| s_agg.push(m.scale_and_sum(kappa)));
+        assert_eq!(s_agg.len(), n);
+        
+        // sort s
+        s_agg.sort();
+        
+        
+        let domain_size = (n+1).next_power_of_two();
+
+        // prepend zeroes
+        let mut lookup_selectors_resized = lookup_selectors.clone();
+        lookup_selectors_resized.resize(domain_size - lookup_selectors.len(), Fr::zero());
+
+        let mut lookup_gates_resized = lookup_gates.clone();
+        lookup_gates_resized.resize(domain_size - lookup_gates.len(), MultiSet::new());
+        
+        // append zeroes
+        let mut table_rows_resized = vec![MultiSet::new(); domain_size-table_rows.len()];
+        table_rows.iter().for_each(|m| table_rows_resized.push(m.clone()));
+
+        // scale and sum lookup gates
+        let lookup_gate_values: Vec<Fr> = lookup_gates.iter().map(|m| m.scale_and_sum(kappa)).collect();
+        
+        // scale and sum table rows
+        let table_row_values: Vec<Fr> = table_rows.iter().map(|m| m.scale_and_sum(kappa)).collect();
+        
+        // scale and sum s aggregation
+        let s_values = s_agg.clone();
+
+
+                
+        let mut beta_one = beta.clone();
+        beta_one.add_assign(&Fr::one());
+        let mut gamma_beta_one = beta_one.clone();
+        gamma_beta_one.mul_assign(&gamma);
+
+
+
+        let z0_num = Fr::one();
+        let z1_den = Fr::one();
+        let z0 = Fr::one();
+
+        
+        fn eval(before: Fr, witness: Fr, t: Fr, t_shifted: Fr, s: Fr, s_shifted: Fr) -> Fr{
+
+            Fr::one()
+        }
+        
+        // z1 = z0 * (1+beta) * F0(beta,gamma) / G0(beta, gamma)
+        let z1 = eval(z0, lookup_gate_values[0], table_row_values[0], table_row_values[1], s_values[0], s_values[1]);
+        // z2 = z1 * (1+beta) * F1(beta,gamma) / G1(beta, gamma)
+        let z2 = eval(z0, lookup_gate_values[1], table_row_values[1], table_row_values[2], s_values[1], s_values[2]);
+        // z3 = z2 * (1+beta) * F2(beta,gamma) / G2(beta, gamma)
+        let z3 = eval(z0, lookup_gate_values[2], table_row_values[2], table_row_values[3], s_values[2], s_values[3]);
     }
 }
