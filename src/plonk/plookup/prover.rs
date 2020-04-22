@@ -589,7 +589,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         }
 
 
-        // PLOOKUP        
+        // PLOOKUP         
+        
         let new_domain_size = required_domain_size*4;
 
         let lookup_selector_poly_index = setup.selector_polynomials.len() -1;
@@ -609,7 +610,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         let gamma_beta_one_poly = Polynomial::from_values(vec![gamma_beta_one; new_domain_size])?;
 
-        let (s_poly, shifted_s_poly) = {
+        let (s_poly, shifted_s_poly, s_original) = {
             let count = required_domain_size - num_lookup_gates - lookup_table.len();
             // construct s = (f,t) sorted by t               
             let mut s_vec = vec![MultiSet::<E>::new();count];
@@ -630,6 +631,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let s: Vec<E::Fr >= s_vec.iter().map(|m| m.scale_and_sum(plookup_challenge)).collect();
 
             let s = Polynomial::from_values(s)?;
+            let s_original = s.clone();
             let factor = ((new_domain_size / s.size()) as usize).next_power_of_two();
             let s = s.ifft(worker);                
             let omega = s.omega.clone();
@@ -638,10 +640,10 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let s = s.lde(worker,factor)?;
             let shifted_s = shifted_s.lde(worker, factor)?;             
             
-            (s, shifted_s)
+            (s, shifted_s, s_original)
         };
 
-        let witness_poly = {
+        let (witness_poly, witness_original, lookup_original) = {
             // f(x) = (a(x) + b(x)*plookup_challenge + c(x)*plookup_challenge^2) * q_lookup(x)
             let mut witness_poly = assignment_polynomials[0].clone();
             let mut bx = assignment_polynomials[1].clone();
@@ -652,18 +654,24 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             witness_poly.add_assign(&worker, &cx);
 
             let witness_poly = witness_poly.clone_padded_to_domain()?;
+            let witness_original = witness_poly.clone();
 
             let factor = ((new_domain_size / witness_poly.size()) as usize).next_power_of_two();           
             let mut witness_poly = witness_poly.ifft(worker).lde(worker, factor)?;            
 
+            let lookup_original = lookup_selector_poly.clone().fft(&worker);
+
             let lookup_poly = lookup_selector_poly.lde(worker, factor)?;
             witness_poly.mul_assign(&worker, &lookup_poly);
-                        
-            (witness_poly)
+            
+            
+            (witness_poly,witness_original, lookup_original)
 
-        };        
+        };
 
-        let (table_poly, shifted_table_poly) = {
+
+
+        let (table_poly, shifted_table_poly, table_original) = {
             // t(x) = t_1(x) + t_2(x)*plookup_challenge + t_3(x)* plookup_challenge^2 
             let mut t1_values = vec![E::Fr::zero(); required_domain_size-lookup_table.len()];
             let mut t2_values = vec![E::Fr::zero(); required_domain_size-lookup_table.len()];
@@ -684,26 +692,82 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             t3.scale(&worker, plookup_challenge_square);
             table_poly.add_assign(&worker, &t3);
 
+            let table_original = table_poly.clone();
             let factor = ((new_domain_size / table_poly.size()) as usize).next_power_of_two();
             let omega = table_poly.omega.clone();
             let table_poly = table_poly.ifft(worker);
             let mut shifted_table_poly = table_poly.clone();
             shifted_table_poly.distribute_powers(&worker, omega);
+
             let table_poly = table_poly.lde(worker, factor)?;
             let shifted_table_poly = shifted_table_poly.lde(&worker, factor)?;
             
-            (table_poly,shifted_table_poly)
-        };
-        
+            (table_poly,shifted_table_poly, table_original)
+        };        
 
-        //                      (\beta + 1)^i * (gamma + f_0)^i * \prod_{1<j < i}(\gamma + f_j) * \prod_{1 <= j < i}(\gamma(1 + \beta} + t_j + \beta * t_{j+1})
-        // Z_{i + 1} =  Z_i *    ___________________________________________________________________________________________________
-        //                                   \prod_{1 <= j < i}(\gamma(1 + \beta) + s_j + \beta * s_{j+1})
-        //                                                                              n
+        let (plookup_z, plookup_shifted_z) = {
+            let number_of_steps = witness_original.as_ref().len()-1;
+
+            let mut z_evals = vec![E::Fr::one(); number_of_steps+1];
+
+            let mut new_witness_original = vec![E::Fr::zero(); number_of_steps+1];
+
+            for (i, (original, new)) in witness_original.as_ref().iter().zip(new_witness_original.iter_mut()).enumerate(){
+                if lookup_original.as_ref()[i] == E::Fr::one(){
+                    *new = *original;
+                }
+            }
+
+            for i in 0..number_of_steps{
+                let mut witness_part = gamma.clone();
+                witness_part.add_assign(&new_witness_original[i]);
+
+                let mut table_part = table_original.as_ref()[i+1];
+                table_part.mul_assign(&beta);                
+                table_part.add_assign(&table_original.as_ref()[i]);
+                table_part.add_assign(&gamma_beta_one);
+
+                let mut s_part = s_original.as_ref()[i+1].clone();
+                s_part.mul_assign(&beta);
+                s_part.add_assign(&s_original.as_ref()[i]);
+                s_part.add_assign(&gamma_beta_one);
+
+                let den = s_part.inverse().expect("should have inverse"); // TODO: batch inverse
+
+                let mut num = beta_one.clone();
+                num.mul_assign(&witness_part);
+                num.mul_assign(&table_part);
+
+                num.mul_assign(&den);
+                
+                let prev = z_evals[i].clone();
+
+                z_evals[i+1].mul_assign(&prev);
+                z_evals[i+1].mul_assign(&num);
+            }
+
+            let z = Polynomial::from_values(z_evals)?;
+
+            let mut shifted_z_monomial = z.clone().ifft(&worker);
+            let omega = z.omega.clone();
+            shifted_z_monomial.distribute_powers(&worker, omega);
+            let shifted_z = shifted_z_monomial.fft(&worker);
+
+            let expected = gamma_beta_one.pow([(number_of_steps) as u64]);
+            assert_eq!(shifted_z.as_ref()[number_of_steps-1], expected);
+            assert_eq!(z.as_ref()[0], E::Fr::one());
+            
+            (z, shifted_z)
+        };
+
+               
+
+        // TODO:  Z(x*omega) * (\gamma (1 + \beta) + s(x) + \beta * s(x*omega) - Z(x)* (\beta + 1) * (\gamma + f(x)) * (\gamma(1 + \beta) + t(x) + \beta * t(x*omega) = 0
         
         let mut plookup_num = {        
-            let beta_one_poly = Polynomial::from_values(vec![beta_one; new_domain_size])?;
             let gamma_poly = Polynomial::from_values(vec![gamma; new_domain_size])?;
+            let beta_one_poly = Polynomial::from_values(vec![beta_one; new_domain_size])?;
+
             let mut num = witness_poly.clone();
             num.add_assign(&worker, &gamma_poly);    
             let mut shifted_table_poly = shifted_table_poly.clone();
@@ -722,30 +786,49 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             den.scale(&worker, beta);
             den.add_assign(&worker, &s_poly);
             den.add_assign(&worker, &gamma_beta_one_poly);
-            den.batch_inversion(&worker)?;
+            // den.batch_inversion(&worker)?;
 
             den
         };
 
-        plookup_num.mul_assign(&worker, &plookup_den);
+        plookup_num.mul_assign(&worker, &plookup_den); // TODO: AD- BC = 0 friendly
+
+        let domain_size_for_quotient = new_domain_size * 2;
+
+        let mut plookup_polynomials = vec![plookup_z, plookup_num, plookup_shifted_z, plookup_den];
+
+        for p in plookup_polynomials.iter_mut(){
+            let factor = ((domain_size_for_quotient / p.size()) as usize).next_power_of_two();
+            *p = p.clone().ifft(&worker).lde(&worker, factor)?;
+        }
         
-        let plookup_z_in_monomial = plookup_num.ifft(&worker);
+        let mut plookup_t = plookup_polynomials[0].clone();
+        plookup_t.mul_assign(&worker, &plookup_polynomials[1]);
 
-        use crate::plonk::domains::materialize_domain_elements_with_natural_enumeration;
+        let mut tmp = plookup_polynomials[2].clone();
+        tmp.mul_assign(&worker, &plookup_polynomials[3]);
 
-        // let domain_elements = materialize_domain_elements_with_natural_enumeration(&domain, &worker);
-
-        let plookup_z_evals_in_original_domain: Vec<E::Fr> = domain_elements.iter().map(|e| plookup_z_in_monomial.evaluate_at(&worker, *e)).collect();
-
-        let plookup_z_evals = Polynomial::from_values(plookup_z_evals_in_original_domain)?;
-
-        let grand_product_of_plookup = plookup_z_evals.calculate_grand_product(&worker)?;
         
-        let gamma_beta_one_offset = required_domain_size - 1;
+        plookup_t.sub_assign(&worker, &tmp);
 
-        let z_expected = gamma_beta_one.pow([(required_domain_size-1) as u64]);
+        
 
-        assert_eq!(grand_product_of_plookup.as_ref()[gamma_beta_one_offset-1], z_expected);
+
+
+        // let plookup_z_in_monomial = plookup_num.clone().ifft(&worker);
+
+        // let plookup_z_evals_in_original_domain: Vec<E::Fr> = domain_elements.iter().map(|e| plookup_z_in_monomial.evaluate_at(&worker, *e)).collect();
+
+        // let plookup_z_evals = Polynomial::from_values(plookup_z_evals_in_original_domain)?;
+
+        // let grand_product_of_plookup = plookup_z_evals.calculate_grand_product(&worker)?;
+        // let shifted_grand_product_of_plookup = plookup_z_evals.calculate_shifted_grand_product(&worker)?;
+        
+        // let gamma_beta_one_offset = required_domain_size - 1;
+
+        // let z_expected = gamma_beta_one.pow([(required_domain_size-1) as u64]);
+
+        // assert_eq!(shifted_grand_product_of_plookup.as_ref()[gamma_beta_one_offset], z_expected);
     
 
         let alpha = transcript.get_challenge();
@@ -1535,51 +1618,5 @@ mod test {
         let z2 = eval(z0, lookup_gate_values[1], table_row_values[1], table_row_values[2], s_values[1], s_values[2]);
         // z3 = z2 * (1+beta) * F2(beta,gamma) / G2(beta, gamma)
         let z3 = eval(z0, lookup_gate_values[2], table_row_values[2], table_row_values[3], s_values[2], s_values[3]);
-    }
-
-    #[test]
-    fn test_ifft_after_product(){
-        use crate::plonk::polynomials::{Polynomial, Values};
-        use crate::multicore::Worker;
-        use crate::pairing::bls12_381::{Bls12, Fr};
-
-        let worker = Worker::new();
-
-        let zero = Fr::zero();
-        let one = Fr::one();
-        let two = Fr::from_str("2").unwrap();
-        let three = Fr::from_str("3").unwrap();
-
-
-        let p1_poly = Polynomial::from_coeffs(vec![one, two, three]).unwrap();
-        let p1 = p1_poly.clone().coset_lde(&worker,2).unwrap();
-        println!("p1 eval");
-        p1.clone().ifft(&worker).as_ref().iter().for_each(|e| println!("{}", e));
-        let p2_poly = Polynomial::from_coeffs(vec![two, three, one]).unwrap();
-        let p2 = p2_poly.clone().coset_lde(&worker, 2).unwrap();
-        println!("p2 eval");
-        p2.clone().ifft(&worker).as_ref().iter().for_each(|e| println!("{}", e));
-        
-        
-        let mut p3 = p1.clone();
-        p3.mul_assign(&worker, &p2);
-        
-        let p3_poly = p3.icoset_fft(&worker);
-        
-        println!("p3 eval");
-        p3_poly.clone().as_ref().iter().for_each(|e| println!("{}", e));
-
-        let seven = Fr::from_str("7").unwrap();
-        let thirteen = Fr::from_str("13").unwrap();
-        let eleven = Fr::from_str("11").unwrap();
-
-        let expected_poly = Polynomial::from_coeffs(vec![two, seven, thirteen, eleven, three]).unwrap();
-        assert_eq!(p3_poly, expected_poly);
-        // x0   x1  x2
-        // 1    2   3
-        // 2    1   3
-
-        // 2 7 13 11 3
-
     }
 }
