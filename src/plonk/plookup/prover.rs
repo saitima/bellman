@@ -589,8 +589,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
 
         // PLOOKUP         
-        
-        let new_domain_size = required_domain_size*8;
+        let plookup_lde_factor = 8;
+        let new_domain_size = required_domain_size*plookup_lde_factor;
 
         let lookup_selector_poly_index = setup.selector_polynomials.len() -1;
         let lookup_selector_poly = setup.selector_polynomials[lookup_selector_poly_index].clone();
@@ -636,8 +636,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let omega = s.omega.clone();
             let mut shifted_s  = s.clone();
             shifted_s.distribute_powers(&worker, omega);
-            let s = s.lde(worker,factor)?;
-            let shifted_s = shifted_s.lde(worker, factor)?;             
+            let s = s.coset_lde(worker,factor)?;
+            let shifted_s = shifted_s.coset_lde(worker, factor)?;             
             
             (s, shifted_s, s_original)
         };
@@ -656,11 +656,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let witness_original = witness_poly.clone();
 
             let factor = ((new_domain_size / witness_poly.size()) as usize).next_power_of_two();           
-            let mut witness_poly = witness_poly.ifft(worker).lde(worker, factor)?;            
+            let mut witness_poly = witness_poly.ifft(worker).coset_lde(worker, factor)?;            
 
             let lookup_original = lookup_selector_poly.clone().fft(&worker);
 
-            let lookup_poly = lookup_selector_poly.lde(worker, factor)?;
+            let lookup_poly = lookup_selector_poly.coset_lde(worker, factor)?;
             witness_poly.mul_assign(&worker, &lookup_poly);
             
             
@@ -696,8 +696,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let mut shifted_table_poly = table_poly.clone();
             shifted_table_poly.distribute_powers(&worker, omega);
 
-            let table_poly = table_poly.lde(worker, factor)?;
-            let shifted_table_poly = shifted_table_poly.lde(&worker, factor)?;
+            let table_poly = table_poly.coset_lde(worker, factor)?;
+            let shifted_table_poly = shifted_table_poly.coset_lde(&worker, factor)?;
             
             (table_poly,shifted_table_poly, table_original)
         };        
@@ -754,16 +754,17 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             assert_eq!(shifted_z.as_ref()[number_of_steps-1], expected);
             assert_eq!(z.as_ref()[0], E::Fr::one());
 
-            for (i, (sz, z)) in shifted_z.as_ref().iter().zip(z.as_ref().iter()).enumerate(){
-                // println!(" {} {} {}", z, sz, gamma_beta_one.pow([(number_of_steps-i) as u64]));
-            }
+            let factor = ((new_domain_size / z.size()) as usize).next_power_of_two();
+            let z = z.ifft(&worker).coset_lde(&worker, factor)?;
+            let shifted_z = shifted_z.ifft(&worker).coset_lde(&worker, factor)?;
 
-            
+            // for (i, (sz, z)) in shifted_z.as_ref().iter().zip(z.as_ref().iter()).enumerate(){
+            //     println!(" {} {}", z, sz);
+            // }
             (z, shifted_z)
         };
 
-            
-        // TODO:  Z(x*omega) * (\gamma (1 + \beta) + s(x) + \beta * s(x*omega) - Z(x)* (\beta + 1) * (\gamma + f(x)) * (\gamma(1 + \beta) + t(x) + \beta * t(x*omega) = 0
+        // Z(x*omega) * (\gamma (1 + \beta) + s(x) + \beta * s(x*omega) - Z(x)* (\beta + 1) * (\gamma + f(x)) * (\gamma(1 + \beta) + t(x) + \beta * t(x*omega) = 0
         
         let  plookup_num = {        
             let gamma_poly = Polynomial::from_values(vec![gamma; new_domain_size])?;
@@ -791,41 +792,35 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
             den
         };
-    
 
-        let domain_size_for_quotient = new_domain_size;
+        assert_eq!(plookup_num.size(), new_domain_size);
+        assert_eq!(plookup_den.size(), new_domain_size);
 
-        let mut plookup_polynomials = vec![plookup_shifted_z, plookup_den, plookup_z, plookup_num];
+        let mut plookup_t = plookup_shifted_z.clone();
 
-        for p in plookup_polynomials.iter_mut(){
-            let factor = ((domain_size_for_quotient / p.size()) as usize).next_power_of_two();
-            *p = p.clone().ifft(&worker).lde(&worker, factor)?;
-        }
-    
-        // plookup_polynomials[0].as_ref().iter().for_each(|e| println!("{}", e));
+        plookup_t.mul_assign(&worker, &plookup_den);
 
-        let mut plookup_t = plookup_polynomials[0].clone();
-        plookup_t.mul_assign(&worker, &plookup_polynomials[1]);
+        let mut tmp = plookup_z.clone();
 
-        let mut tmp = plookup_polynomials[2].clone();
-        tmp.mul_assign(&worker, &plookup_polynomials[3]);
+        tmp.mul_assign(&worker, &plookup_num);
 
         plookup_t.sub_assign(&worker, &tmp);
 
-        let mut vanishing_poly_of_plookup =
-        evaluate_vanishing_polynomial_of_degree_on_domain_size::<E::Fr>(
-            required_domain_size as u64,
-            &E::Fr::multiplicative_generator(),
-            domain_size_for_quotient as u64,
-            &worker,
-        )?;
-        vanishing_poly_of_plookup.batch_inversion(&worker)?;
+        let vanishing_poly_for_lookup_quotient = calculate_inverse_vanishing_polynomial_in_a_coset(&worker, new_domain_size, required_domain_size)?;
 
-        plookup_t.mul_assign(&worker, &vanishing_poly_of_plookup);
+        let vanishing_poly_for_lookup_quotient_in_monomial = vanishing_poly_for_lookup_quotient.clone().ifft(&worker);
+
+        vanishing_poly_for_lookup_quotient_in_monomial.as_ref().iter().for_each(|e| println!("{}", e));
+
+        plookup_t.mul_assign(&worker, &vanishing_poly_for_lookup_quotient);
 
         let plookup_t_poly = plookup_t.icoset_fft_for_generator(&worker, &E::Fr::multiplicative_generator());
 
-        plookup_t_poly.as_ref().iter().enumerate().for_each(|(i, e)| println!("{} {}", i, e));
+        // plookup_t_poly.as_ref().iter().enumerate().for_each(|(i, e)| println!("{} {}", i, e));
+
+
+        // END PLOOKUP
+
 
 
         let alpha = transcript.get_challenge();
@@ -1375,7 +1370,6 @@ mod test {
         use crate::plonk::plookup::generator::*;
         use crate::plonk::plookup::keys::*;
 
-        let size = 256;
         let bit_size = 2;
         let mut table = vec![];
         for i in 0..bit_size{
@@ -1476,32 +1470,6 @@ mod test {
         assert!(m1 > m3);
     }  
     
-    #[test]
-    fn test_plonk_shifted_poly(){
-        use crate::plonk::polynomials::{Polynomial, Values};
-        use crate::multicore::Worker;
-        use crate::pairing::bls12_381::{Bls12, Fr};
-
-        let one = Fr::from_str("1").unwrap();
-        let two = Fr::from_str("2").unwrap();
-        let three = Fr::from_str("3").unwrap();
-        let four = Fr::from_str("4").unwrap();
-
-        let worker = Worker::new();
-
-        let p = Polynomial::from_values(vec![one, two, three, four]).unwrap();
-
-        let p_poly = p.clone().ifft(&worker);
-
-        let mut generator = p.omegainv.clone();
-        generator.mul_assign(&p.omegainv);
-        let mut shifted = p.clone().ifft(&worker);
-        shifted.distribute_powers(&worker, generator);
-        let shifted = shifted.fft(&worker);
-        shifted.as_ref().iter().for_each(|e| println!("{}", e));
-    
-    }
-
     #[test]
     fn test_plookup_manually(){
         use crate::plonk::polynomials::{Polynomial, Values};
