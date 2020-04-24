@@ -591,7 +591,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         // PLOOKUP         
         let plookup_lde_factor = 8;
         let new_domain_size = required_domain_size*plookup_lde_factor;
-
+        println!("domain: {} new domain: {}", required_domain_size, new_domain_size);
+        
         let lookup_selector_poly_index = setup.selector_polynomials.len() -1;
         let lookup_selector_poly = setup.selector_polynomials[lookup_selector_poly_index].clone();
         let lookup_selector = lookup_selector_poly.clone().fft(worker);        
@@ -606,8 +607,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         let mut gamma_beta_one = beta_one.clone();
         gamma_beta_one.mul_assign(&gamma);
-
-        let gamma_beta_one_poly = Polynomial::from_values(vec![gamma_beta_one; new_domain_size])?;
 
         let (s_poly, shifted_s_poly, s_original) = {
             let count = required_domain_size - num_lookup_gates - lookup_table.len();
@@ -767,27 +766,31 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         // Z(x*omega) * (\gamma (1 + \beta) + s(x) + \beta * s(x*omega) - Z(x)* (\beta + 1) * (\gamma + f(x)) * (\gamma(1 + \beta) + t(x) + \beta * t(x*omega) = 0
         
         let  plookup_num = {        
-            let gamma_poly = Polynomial::from_values(vec![gamma; new_domain_size])?;
-            let beta_one_poly = Polynomial::from_values(vec![beta_one; new_domain_size])?;
-
+            // (\beta + 1) * (\gamma + f(x)) * (\gamma(1 + \beta) + t(x) + \beta * t(x*omega)
             let mut num = witness_poly.clone();
-            num.add_assign(&worker, &gamma_poly);    
+            num.add_constant(&worker, &gamma);
+
             let mut shifted_table_poly = shifted_table_poly.clone();
             shifted_table_poly.scale(&worker, beta);
             shifted_table_poly.add_assign(&worker, &table_poly);
-            shifted_table_poly.add_assign(&worker, &gamma_beta_one_poly);
+            // shifted_table_poly.add_assign(&worker, &gamma_beta_one_poly);
+            shifted_table_poly.add_constant(&worker, &gamma_beta_one);
+
             num.mul_assign(&worker, &shifted_table_poly);
 
-            num.mul_assign(&worker, &beta_one_poly);
+            // num.mul_assign(&worker, &beta_one_poly);
+            num.scale(&worker, beta_one);
             
             num
         };
 
         let plookup_den = {
+            // (\gamma (1 + \beta) + s(x) + \beta * s(x*omega)
             let mut den = shifted_s_poly.clone();
             den.scale(&worker, beta);
             den.add_assign(&worker, &s_poly);
-            den.add_assign(&worker, &gamma_beta_one_poly);
+            den.add_constant(&worker, &gamma_beta_one);
+            // den.add_assign(&worker, &gamma_beta_one_poly);
             // den.batch_inversion(&worker)?;
 
             den
@@ -806,17 +809,22 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         plookup_t.sub_assign(&worker, &tmp);
 
+        // plookup_t.clone().ifft(&worker).fft(&worker).as_ref().iter().for_each(|e| println!("{}", e));
+
+        // println!("---");
         let vanishing_poly_for_lookup_quotient = calculate_inverse_vanishing_polynomial_in_a_coset(&worker, new_domain_size, required_domain_size)?;
 
         let vanishing_poly_for_lookup_quotient_in_monomial = vanishing_poly_for_lookup_quotient.clone().ifft(&worker);
 
-        vanishing_poly_for_lookup_quotient_in_monomial.as_ref().iter().for_each(|e| println!("{}", e));
+        // vanishing_poly_for_lookup_quotient_in_monomial.as_ref().iter().for_each(|e| println!("{}", e));
 
         plookup_t.mul_assign(&worker, &vanishing_poly_for_lookup_quotient);
 
-        let plookup_t_poly = plookup_t.icoset_fft_for_generator(&worker, &E::Fr::multiplicative_generator());
+        // let plookup_t_poly = plookup_t.icoset_fft_for_generator(&worker, &E::Fr::multiplicative_generator());
+        // let plookup_t_poly = plookup_t.ifft(&worker);
+        let plookup_t_poly = plookup_t.icoset_fft(&worker);
 
-        // plookup_t_poly.as_ref().iter().enumerate().for_each(|(i, e)| println!("{} {}", i, e));
+        plookup_t_poly.as_ref().iter().enumerate().for_each(|(i, e)| println!("{} {}", i, e));
 
 
         // END PLOOKUP
