@@ -714,6 +714,9 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 }
             }
 
+            let mut numerator = Polynomial::from_values(vec![E::Fr::one(); number_of_steps + 1])?;
+            let mut denominator = Polynomial::from_values(vec![E::Fr::one(); number_of_steps + 1])?;
+
             for i in 0..number_of_steps{
                 let mut witness_part = gamma.clone();
                 witness_part.add_assign(&new_witness_original[i]);
@@ -723,26 +726,30 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 table_part.add_assign(&table_original.as_ref()[i]);
                 table_part.add_assign(&gamma_beta_one);
 
+                let mut num = beta_one.clone();
+                num.mul_assign(&witness_part);
+                num.mul_assign(&table_part);
+                
+                numerator.as_mut()[i+1] = num;
+
+
                 let mut s_part = s_original.as_ref()[i+1].clone();
                 s_part.mul_assign(&beta);
                 s_part.add_assign(&s_original.as_ref()[i]);
                 s_part.add_assign(&gamma_beta_one);
 
-                let den = s_part.inverse().expect("should have inverse"); // TODO: batch inverse
+                denominator.as_mut()[i+1] = s_part;
 
-                let mut num = beta_one.clone();
-                num.mul_assign(&witness_part);
-                num.mul_assign(&table_part);
 
-                num.mul_assign(&den);
-                
-                let prev = z_evals[i].clone();
-
-                z_evals[i+1].mul_assign(&prev);
-                z_evals[i+1].mul_assign(&num);
             }
 
-            let z = Polynomial::from_values(z_evals)?;
+            denominator.batch_inversion(&worker)?;
+            denominator = denominator.calculate_grand_product(&worker)?;
+            numerator  = numerator.calculate_grand_product(&worker)?;
+
+            numerator.mul_assign(&worker, &denominator);
+
+            let z = numerator.clone();
 
             let mut shifted_z_monomial = z.clone().ifft(&worker);
             let omega = z.omega.clone();
@@ -1402,7 +1409,8 @@ mod test {
 
         assembly.finalize();
 
-        let worker = Worker::new();
+        // let worker = Worker::new();
+        let worker = Worker::new_with_cpus(1);
 
         let setup = assembly.setup(&worker).unwrap();
 
