@@ -24,7 +24,7 @@ use std::num::Wrapping;
 
 const MODULUS_R: Wrapping<u32> = Wrapping(64513);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Fr(Wrapping<u32>);
 
 impl fmt::Display for Fr {
@@ -160,7 +160,7 @@ impl SqrtField for Fr {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FrRepr([u64; 1]);
 
 impl Ord for FrRepr {
@@ -486,11 +486,18 @@ impl CurveAffine for Fr {
         *self
     }
 
+    fn as_xy(&self) -> (&Self::Base, &Self::Base) {
+        unreachable!()
+    }
 
     fn into_xy_unchecked(&self) -> (Self::Base, Self::Base) {
-        (<Fr as Field>::zero(), <Fr as Field>::zero())
+        unreachable!()
     }
     fn from_xy_unchecked(_x: Self::Base, _y: Self::Base) -> Self {
-        <Fr as Field>::zero()
+        unreachable!()
     }
+   
+    fn from_xy_checked(_x: Self::Base, _y: Self::Base) -> Result<Self, crate::pairing::GroupDecodingError> {
+        unreachable!()
+    }		     
 }

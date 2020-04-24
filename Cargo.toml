@@ -17,9 +17,7 @@ rand = "0.4"
 bit-vec = "0.6"
 cfg-if = "0.1"
 
-# pairing = {package = "pairing_ce", path = "../pairing" }
-# pairing = {package = "pairing_ce", version = "0.19" }
-pairing = {package = "pairing_ce", git = "https://github.com/matter-labs/pairing.git", branch = "affine-ops"}
+pairing = {package = "pairing_ce", version = "0.21" }
 byteorder = "1"
 
 futures= {package = "futures", version = "0.3", default_features = false, features = ["executor"]}
@@ -54,4 +52,3 @@ plonk = ["blake2s_simd", "lazy_static", "tiny-keccak", "blake2s_const"]
 marlin = ["blake2s_simd", "tiny-keccak", "blake2s_const"]
 wasm = ["web-sys"]
 nightly = ["prefetch"]
-derive_serde = ["pairing/derive_serde"]

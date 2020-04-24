@@ -1,9 +1,10 @@
 use crate::ff::*;
 use super::{PartialReductionField, PartialTwoBitReductionField};
 
-#[derive(Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, Default, Hash)]
 pub struct FrRepr(pub [u64; 4usize]);
 
+#[derive(Hash)]
 pub struct Fr(FrRepr);
 
 // const MODULUS: FrRepr = FrRepr([1u64, 0u64, 0u64, 576460752303423505u64]);

@@ -186,12 +186,20 @@ macro_rules! transparent_engine_impl {
                 *self
             }
 
+            fn as_xy(&self) -> (&Self::Base, &Self::Base) {
+                unreachable!()
+            }
+
             fn into_xy_unchecked(&self) -> (Self::Base, Self::Base) {
-                (<$fr as crate::ff::Field>::zero(), <$fr as crate::ff::Field>::zero())
+                unreachable!()
             }
 
             fn from_xy_unchecked(_x: Self::Base, _y: Self::Base) -> Self {
-                <$fr as crate::ff::Field>::zero()
+                unreachable!()
+            }
+
+            fn from_xy_checked(_x: Self::Base, _y: Self::Base) -> Result<Self, crate::pairing::GroupDecodingError> {
+                unreachable!()
             }
         }
 

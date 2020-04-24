@@ -101,31 +101,31 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_proth_field() {
-        use crate::ff::{Field, PrimeField};
-        use super::Fr as FrMontNaive;
-        use super::proth::Fr as FrOptimized;
+    // #[test]
+    // fn test_proth_field() {
+    //     use crate::ff::{Field, PrimeField};
+    //     use super::Fr as FrMontNaive;
+    //     use super::proth::Fr as FrOptimized;
 
-        let one_naive = FrMontNaive::from_str("1").unwrap();
-        let one_optimized = FrOptimized::from_str("1").unwrap();
+    //     let one_naive = FrMontNaive::from_str("1").unwrap();
+    //     let one_optimized = FrOptimized::from_str("1").unwrap();
 
-        println!("{}", FrMontNaive::one());
-        println!("{}", FrOptimized::one());
+    //     println!("{}", FrMontNaive::one());
+    //     println!("{}", FrOptimized::one());
 
-        println!("{}", one_naive.into_raw_repr());
-        println!("{}", one_optimized.into_raw_repr());
+    //     println!("{}", one_naive.into_raw_repr());
+    //     println!("{}", one_optimized.into_raw_repr());
 
-        let mut tmp0 = one_naive;
-        tmp0.mul_assign(&one_naive);
+    //     let mut tmp0 = one_naive;
+    //     tmp0.mul_assign(&one_naive);
 
-        let mut tmp1 = one_optimized;
-        tmp1.mul_assign(&one_optimized);
+    //     let mut tmp1 = one_optimized;
+    //     tmp1.mul_assign(&one_optimized);
 
-        assert_eq!(tmp0.to_hex(), tmp1.to_hex());
+    //     assert_eq!(tmp0.to_hex(), tmp1.to_hex());
 
-        assert_eq!(FrMontNaive::multiplicative_generator().to_hex(), FrOptimized::multiplicative_generator().to_hex());
-    }
+    //     assert_eq!(FrMontNaive::multiplicative_generator().to_hex(), FrOptimized::multiplicative_generator().to_hex());
+    // }
 
     #[test]
     fn test_bench_precomputations_for_proth_fft() {
