@@ -20,9 +20,10 @@ use crate::plonk::commitments::transcript::*;
 use crate::plonk::fft::cooley_tukey_ntt::*;
 
 use super::LDE_FACTOR;
+use super::lookup_table::{LookupTable};
 
 // #[derive(Debug, Clone)]
-pub struct ProverAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
+pub struct ProverAssembly<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> {
     m: usize,
     n: usize,
     // input_gates: Vec<(P::StateVariables, P::ThisTraceStepCoefficients, P::NextTraceStepCoefficients)>,
@@ -44,13 +45,13 @@ pub struct ProverAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
 
     is_finalized: bool,
 
-    lookup_table: Vec<(E::Fr, E::Fr, E::Fr)>,
+    lookup_table: Option<L>,
     is_table_initialized: bool,
 
     _marker: std::marker::PhantomData<P>
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for ProverAssembly<E, P> {
+impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> ConstraintSystem<E, P> for ProverAssembly<E, P, L> {
     // allocate a variable
     fn alloc<F>(&mut self, value: F) -> Result<Variable, SynthesisError>
     where
@@ -128,9 +129,14 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Pr
     }
 
     fn read_from_table(&mut self, a: Variable, b: Variable) -> Result<Variable, SynthesisError>{
+        let table = match &self.lookup_table{
+            Some(table) => table,
+            _ => panic!("no lookup table defined"),
+        };
+
         let a_val = self.get_value(a)?;
         let b_val = self.get_value(b)?;
-        let c_val = self.find_value_in_table(a_val, b_val)?;
+        let c_val = table.query(a_val, b_val).expect("should has value");
         
         let c = self.alloc(|| {
             Ok(c_val)
@@ -140,14 +146,14 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Pr
         self.wire_assignments[1].push(b_val);
         self.wire_assignments[2].push(c_val);
         self.wire_assignments[3].push(E::Fr::zero());
-        // println!("n {}", self.n);
+
         self.n += 1;
         self.num_lookups += 1;
         Ok(c)
     }
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
+impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> ProverAssembly<E, P, L> {
     pub fn new() -> Self {
         let tmp = Self {
             n: 0,
@@ -169,7 +175,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
 
             is_finalized: false,
 
-            lookup_table: vec![],
+            lookup_table: None,
             is_table_initialized: false,
 
             _marker: std::marker::PhantomData
@@ -199,7 +205,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
 
             is_finalized: false,
 
-            lookup_table: vec![],
+            lookup_table: None,
             is_table_initialized: false,
 
             _marker: std::marker::PhantomData
@@ -208,7 +214,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
         tmp
     }
     
-    pub fn new_with_lookup_table(table: Vec<(E::Fr, E::Fr, E::Fr)>) -> Self {
+    pub fn new_with_lookup_table(table: L) -> Self {
         let tmp = Self {
             n: 0,
             m: 0,
@@ -221,7 +227,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
             inputs_map: vec![],
             dummy_var: Variable(Index::Aux(0)),
             is_finalized: false,
-            lookup_table: table,
+            lookup_table: Some(table),
             is_table_initialized: true,
 
             _marker: std::marker::PhantomData
@@ -243,7 +249,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
         if self.is_finalized {
             return;
         }
-        let table_size = self.lookup_table.len();
+        let table_size = match &self.lookup_table{
+            Some(table) =>  table.size(),
+            _ => 0
+        };
+
         let lookup_gates = self.num_lookups;
         let filled_gates = self.n + self.num_inputs;
         let n = filled_gates.max(table_size + lookup_gates);
@@ -265,16 +275,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
         self.is_finalized = true;
     }
 
-    pub fn find_value_in_table(&self, a: E::Fr, b: E::Fr) -> Result<E::Fr, SynthesisError>{        
-        // TODO: c =
-        let (_, _, c) = self.lookup_table.iter().find(|(col1, col2, _)| (*col1 == a && *col2 == b ) || (*col1 == b && *col2 == a ) ).expect("table must have");
 
-        Ok(*c)
+    pub fn get_lookup_table(&self) -> Option<L>{
+        self.lookup_table.clone() // TODO
     }
 
-    pub fn get_lookup_table(self) -> Vec<(E::Fr, E::Fr, E::Fr)>{
-        self.lookup_table
-    }
     pub fn make_witness_polynomials(
         self
     ) -> Result<Vec<Vec<E::Fr>>, SynthesisError>
@@ -307,6 +312,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
 use std::cmp::Ordering;
 #[derive(Debug, Clone)]
 pub struct MultiSet<E: Engine>([E::Fr; 3]);
+
 impl<E: Engine> MultiSet<E>{
     pub fn new()-> Self{
         Self([E::Fr::zero();3])
@@ -379,10 +385,10 @@ impl<E: Engine> Ord for MultiSet<E>{
 // later we can alias traits
 // pub trait PlonkCsWidth3WithNextStep<E: Engine> = ConstraintSystem<E, PlonkCsWidth3WithNextStepParams>;
 
-pub type ProverAssembly3WithNextStep<E> = ProverAssembly<E, PlonkCsWidth3WithNextStepParams>;
-pub type ProverAssembly4WithNextStep<E> = ProverAssembly<E, PlonkCsWidth4WithNextStepParams>;
+pub type ProverAssembly3WithNextStep<E, L> = ProverAssembly<E, PlonkCsWidth3WithNextStepParams, L>;
+pub type ProverAssembly4WithNextStep<E, L> = ProverAssembly<E, PlonkCsWidth4WithNextStepParams, L>;
 
-impl<E: Engine> ProverAssembly4WithNextStep<E> {
+impl<E: Engine, L: LookupTable<E::Fr>> ProverAssembly4WithNextStep<E, L> {
     pub fn prove<T: Transcript<E::Fr>, CP: CTPrecomputations<E::Fr>, CPI: CTPrecomputations<E::Fr>>(
         self, 
         worker: &Worker, 
@@ -412,10 +418,12 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         let required_domain_size = n + 1;
         assert!(required_domain_size.is_power_of_two());
 
-        let lookup_table = self.lookup_table.clone();
+        let lookup_table = self.get_lookup_table().expect("lookup table is set").clone();
+        
         let num_lookup_gates = self.num_lookups;
 
         let full_assignments = self.make_witness_polynomials()?;
+
 
         let mut proof = Proof::<E, PlonkCsWidth4WithNextStepParams>::empty();
         proof.n = n;
@@ -622,10 +630,12 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                     *s = MultiSet::from_vec([*l, *r, *o]);
                 }
             }
+
+
             
             let s_mut = &mut s_vec[(required_domain_size-num_lookup_gates)..];
-            for (s, t) in s_mut.iter_mut().zip(lookup_table.iter()){
-                *s  = MultiSet::from_vec([t.0, t.1, t.2]);
+            for (s, t) in s_mut.iter_mut().zip(lookup_table.clone().iter()){
+                *s  = MultiSet::from_vec([t.0, t.1, t.2]); // TODO:
             }
 
             s_vec.sort();
@@ -671,13 +681,14 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         let (table_poly, shifted_table_poly, table_original) = {
             // t(x) = t_1(x) + t_2(x)*plookup_challenge + t_3(x)* plookup_challenge^2 
-            let mut t1_values = vec![E::Fr::zero(); required_domain_size-lookup_table.len()];
-            let mut t2_values = vec![E::Fr::zero(); required_domain_size-lookup_table.len()];
-            let mut t3_values = vec![E::Fr::zero(); required_domain_size-lookup_table.len()];
-            for i in 0..lookup_table.len(){
-                t1_values.push(lookup_table[i].0);
-                t2_values.push(lookup_table[i].1);
-                t3_values.push(lookup_table[i].2);
+            let table_size = lookup_table.size();
+            let mut t1_values = vec![E::Fr::zero(); required_domain_size-table_size];
+            let mut t2_values = vec![E::Fr::zero(); required_domain_size-table_size];
+            let mut t3_values = vec![E::Fr::zero(); required_domain_size-table_size];
+            for row in lookup_table.iter(){
+                t1_values.push(row.0);
+                t2_values.push(row.1);
+                t3_values.push(row.2);
             }
 
             let t1 = Polynomial::from_values(t1_values)?;
@@ -1360,20 +1371,12 @@ mod test {
         use crate::worker::Worker;
         use crate::plonk::plookup::generator::*;
         use crate::plonk::plookup::keys::*;
+        use crate::plonk::plookup::lookup_table::XorTable;
 
         let bit_size = 2;
-        let mut table = vec![];
-        for i in 0..bit_size{
-            for j in 0..bit_size{
-                let k = i ^ j;
-                let a = Fr::from_str(&j.to_string()).unwrap();
-                let b = Fr::from_str(&i.to_string()).unwrap();
-                let c = Fr::from_str(&k.to_string()).unwrap();
-                table.push((a,b,c));
-            }
-        }
+        let table = XorTable::<Fr>::new(bit_size);
 
-        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256>::new_with_lookup_table(table.clone());
+        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new_with_lookup_table(table.clone());
 
         let circuit = TestCircuit4::<Bn256> {
             _marker: PhantomData
@@ -1408,7 +1411,7 @@ mod test {
 
        
 
-        let mut assembly = ProverAssembly4WithNextStep::<Bn256>::new_with_lookup_table(table);
+        let mut assembly = ProverAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new_with_lookup_table(table);
 
         circuit.clone().synthesize(&mut assembly).expect("must work");
 

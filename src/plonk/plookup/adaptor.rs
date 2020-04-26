@@ -2223,6 +2223,7 @@ fn transpile_xor_using_new_adaptor() {
     use super::keys::*;
     use crate::plonk::domains::Domain;
     use super::utils::make_non_residues;
+    use super::lookup_table::XorTable;
 
     let c = XORDemo::<Bn256> {
         a: None,
@@ -2260,7 +2261,7 @@ fn transpile_xor_using_new_adaptor() {
     println!("Transpiled into {} gates", num_gates);
 
     let adapted_curcuit = AdaptorCircuit::<Bn256, PlonkCsWidth4WithNextStepParams, _>::new(c.clone(), &hints);
-    let mut assembly = GeneratorAssembly4WithNextStep::<Bn256>::new();
+    let mut assembly = GeneratorAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new();
     adapted_curcuit.synthesize(&mut assembly).expect("sythesize of transpiled into CS must succeed");
     assembly.finalize();
 
@@ -2282,7 +2283,7 @@ fn transpile_xor_using_new_adaptor() {
         &worker
     ).unwrap();
 
-    let mut assembly = ProverAssembly4WithNextStep::<Bn256>::new();
+    let mut assembly = ProverAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new();
 
     let adapted_curcuit = AdaptorCircuit::<Bn256, PlonkCsWidth4WithNextStepParams, _>::new(c.clone(), &hints);
 

@@ -11,9 +11,10 @@ use std::marker::PhantomData;
 use super::cs::*;
 use super::keys::SetupPolynomials;
 use super::utils::{make_non_residues};
+use super::lookup_table::LookupTable;
 
 #[derive(Debug, Clone)]
-pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
+pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> {
     m: usize,
     n: usize,
     input_gates: Vec<(P::StateVariables, P::ThisTraceStepCoefficients, P::NextTraceStepCoefficients)>,
@@ -23,14 +24,14 @@ pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
     num_aux: usize,
     num_lookups: usize,
 
-    lookup_table: Vec<(E::Fr, E::Fr, E::Fr)>,
+    lookup_table: Option<L>,
 
     inputs_map: Vec<usize>,
 
     is_finalized: bool
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for GeneratorAssembly<E, P> {
+impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> ConstraintSystem<E, P> for GeneratorAssembly<E, P, L> {
     // allocate a variable
     fn alloc<F>(&mut self, _value: F) -> Result<Variable, SynthesisError>
     where
@@ -100,7 +101,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Ge
     }
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
+impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> GeneratorAssembly<E, P, L> {
     pub fn new() -> Self {
         let tmp = Self {
             n: 0,
@@ -112,7 +113,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
             num_aux: 0,
             num_lookups:0,
 
-            lookup_table: vec![],
+            lookup_table: None,
 
             inputs_map: vec![],
 
@@ -133,7 +134,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
             num_aux: 0,
             num_lookups: 0,
 
-            lookup_table: vec![],
+            lookup_table: None,
 
             inputs_map: Vec::with_capacity(num_inputs),
 
@@ -143,7 +144,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
         tmp
     }
 
-    pub fn new_with_lookup_table(table: Vec<(E::Fr,E::Fr,E::Fr)>) -> Self {
+    pub fn new_with_lookup_table(table: L) -> Self {
         let tmp = Self {
             n: 0,
             m: 0,
@@ -154,7 +155,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
             num_aux: 0,
             num_lookups: 0,
 
-            lookup_table: table,
+            lookup_table: Some(table),
 
             inputs_map: vec![],
 
@@ -180,7 +181,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
             return;
         }
 
-        let table_size = self.lookup_table.len();
+        let table_size = match &self.lookup_table{
+            Some(table) =>  table.size(),
+            _ => 0
+        };
+
         let lookup_gates = self.num_lookups;
         let filled_gates = self.n + self.num_inputs;
         let n = filled_gates.max(table_size + lookup_gates);
@@ -200,45 +205,16 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
         }
 
         self.is_finalized = true;
-    }
-    // pub fn finalize(&mut self) {
-    //     if self.is_finalized {
-    //         return;
-    //     }
-
-    //     let n = self.input_gates.len() + self.aux_gates.len();
-    //     if (n+1).is_power_of_two() {
-    //         self.is_finalized = true;
-    //         return;
-    //     }
-
-    //     let dummy = self.get_dummy_variable();
-
-    //     let vars = P::StateVariables::from_variable_and_padding(dummy, dummy);
-    //     let this_step_coeffs = P::ThisTraceStepCoefficients::empty();
-    //     let next_step_coeffs = P::NextTraceStepCoefficients::empty();
-
-    //     let empty_gate = (vars, this_step_coeffs, next_step_coeffs);
-
-    //     let new_aux_len = (n+1).next_power_of_two() - 1 - self.input_gates.len();
-
-    //     self.aux_gates.resize(new_aux_len, empty_gate);
-
-    //     let n = self.input_gates.len() + self.aux_gates.len();
-    //     assert!((n+1).is_power_of_two());
-    //     self.n = n;
-
-    //     self.is_finalized = true;
-    // }
+    }   
 }
 
 // later we can alias traits
 // pub trait PlonkCsWidth3WithNextStep<E: Engine> = ConstraintSystem<E, PlonkCsWidth3WithNextStepParams>;
 
-pub type GeneratorAssembly3WithNextStep<E> = GeneratorAssembly<E, PlonkCsWidth3WithNextStepParams>;
-pub type GeneratorAssembly4WithNextStep<E> = GeneratorAssembly<E, PlonkCsWidth4WithNextStepParams>;
+pub type GeneratorAssembly3WithNextStep<E, L> = GeneratorAssembly<E, PlonkCsWidth3WithNextStepParams, L>;
+pub type GeneratorAssembly4WithNextStep<E, L> = GeneratorAssembly<E, PlonkCsWidth4WithNextStepParams, L>;
 
-impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
+impl<E: Engine, L: LookupTable<E::Fr>> GeneratorAssembly4WithNextStep<E, L> {
     pub fn make_selector_polynomials(
         &self, 
         worker: &Worker
@@ -602,8 +578,9 @@ mod test {
     fn test_trivial_circuit() {
         use crate::pairing::bn256::{Bn256, Fr};
         use crate::worker::Worker;
+        use crate::plonk::plookup::lookup_table::XorTable;
 
-        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256>::new();
+        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256,XorTable<Fr>>::new();
 
         let circuit = TestCircuit4::<Bn256> {
             _marker: PhantomData
