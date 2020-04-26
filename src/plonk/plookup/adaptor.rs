@@ -14,6 +14,7 @@ use std::marker::PhantomData;
 
 use std::collections::{HashSet, HashMap};
 
+use crate::plonk::plookup::lookup_table::TableType;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeLcVariant {
     AIsTheOnlyMeaningful,
@@ -732,7 +733,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> PlonkConstraintSystem<E, P> f
         PlonkVariable::new_unchecked(PlonkIndex::Aux(0))
     }
 
-    fn read_from_table(&mut self, a: PlonkVariable, b: PlonkVariable) -> Result<PlonkVariable, SynthesisError>{
+    fn read_from_table(&mut self, table_type: TableType, a: PlonkVariable, b: PlonkVariable) -> Result<PlonkVariable, SynthesisError>{
         Ok(self.get_dummy_variable())
     }
 }
@@ -775,7 +776,7 @@ impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> PlonkConstraintSystem<E, 
         PlonkVariable::new_unchecked(PlonkIndex::Aux(0))
     }
     
-    fn read_from_table(&mut self, a: PlonkVariable, b: PlonkVariable) -> Result<PlonkVariable, SynthesisError>{
+    fn read_from_table(&mut self, table_type: TableType, a: PlonkVariable, b: PlonkVariable) -> Result<PlonkVariable, SynthesisError>{
         Ok(self.get_dummy_variable())
     }
 }

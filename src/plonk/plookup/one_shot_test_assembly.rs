@@ -6,6 +6,8 @@ use std::marker::PhantomData;
 
 use super::cs::*;
 
+use crate::plonk::plookup::lookup_table::TableType;
+
 #[derive(Debug, Clone)]
 pub struct OneShotTestAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
     m: usize,
@@ -110,7 +112,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for On
         self.dummy_variable()
     }
 
-    fn read_from_table(&mut self, a: Variable, b: Variable) -> Result<Variable, SynthesisError>{
+    fn read_from_table(&mut self, _table_type: TableType, _a: Variable, _b: Variable) -> Result<Variable, SynthesisError>{
         Ok(self.get_dummy_variable())
     }
 }

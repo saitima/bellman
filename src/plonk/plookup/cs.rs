@@ -6,6 +6,8 @@ use std::marker::PhantomData;
 
 pub use crate::plonk::cs::variable::*;
 
+use crate::plonk::plookup::lookup_table::TableType;
+
 pub trait Circuit<E: Engine, P: PlonkConstraintSystemParams<E>> {
     fn synthesize<CS: ConstraintSystem<E, P>>(&self, cs: &mut CS) -> Result<(), SynthesisError>;
 }
@@ -82,7 +84,7 @@ pub trait ConstraintSystem<E: Engine, P: PlonkConstraintSystemParams<E>> {
 
     fn get_dummy_variable(&self) -> Variable;
 
-    fn read_from_table(&mut self, a: Variable, b: Variable) -> Result<Variable, SynthesisError>;
+    fn read_from_table(&mut self, table_type: TableType, a: Variable, b: Variable) -> Result<Variable, SynthesisError>;
 }
 
 
@@ -261,6 +263,24 @@ impl<E: Engine> TraceStepCoefficients<E> for [E::Fr; 7] {
         [coeffs[0], coeffs[1], coeffs[2], coeffs[3], coeffs[4], coeffs[5], coeffs[6]]
     }
 }
+impl<E: Engine> TraceStepCoefficients<E> for [E::Fr; 8] {
+    fn empty() -> Self {
+        [E::Fr::zero(); 8]
+    }
+    fn identity() -> Self {
+        [E::Fr::one(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero()]
+    }
+    fn negate(&mut self) {
+        for c in self.iter_mut() {
+            c.negate();
+        }
+    }
+    fn from_coeffs(coeffs: &[E::Fr]) -> Self {
+        debug_assert_eq!(coeffs.len(), 8);
+
+        [coeffs[0], coeffs[1], coeffs[2], coeffs[3], coeffs[4], coeffs[5], coeffs[6], coeffs[7]]
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PlonkCsWidth3WithNextStepParams;
@@ -284,7 +304,7 @@ impl<E: Engine> PlonkConstraintSystemParams<E> for PlonkCsWidth4WithNextStepPara
     const CAN_ACCESS_NEXT_TRACE_STEP: bool =  true;
 
     type StateVariables = [Variable; 4];
-    type ThisTraceStepCoefficients = [E::Fr; 7];
+    type ThisTraceStepCoefficients = [E::Fr; 8];
     type NextTraceStepCoefficients = [E::Fr; 1];
 
     type CustomGateType = NoCustomGate;
