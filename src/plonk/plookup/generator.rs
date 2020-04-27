@@ -15,7 +15,7 @@ use super::lookup_table::{LookupTable, TableType};
 
 
 // #[derive(Debug)]
-pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> {
+pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
     m: usize,
     n: usize,
     input_gates: Vec<(P::StateVariables, P::ThisTraceStepCoefficients, P::NextTraceStepCoefficients)>,
@@ -25,7 +25,7 @@ pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>, L: Lo
     num_aux: usize,
     num_lookups: usize,
 
-    lookup_tables: Vec<L>,
+    lookup_tables: Vec<Box<dyn LookupTable<E::Fr>>>,
     is_table_initialized: bool,
 
     inputs_map: Vec<usize>,
@@ -33,7 +33,7 @@ pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>, L: Lo
     is_finalized: bool
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>,L: LookupTable<E::Fr>> ConstraintSystem<E, P> for GeneratorAssembly<E, P, L> {
+impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for GeneratorAssembly<E, P> {
     // allocate a variable
     fn alloc<F>(&mut self, _value: F) -> Result<Variable, SynthesisError>
     where
@@ -119,7 +119,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>,L: LookupTable<E::Fr>> Constra
     }
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>,L: LookupTable<E::Fr>> GeneratorAssembly<E, P, L> {
+impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
     pub fn new() -> Self {
         let tmp = Self {
             n: 0,
@@ -165,7 +165,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>,L: LookupTable<E::Fr>> Generat
         tmp
     }
 
-    pub fn new_with_lookup_table(lookup_tables: Vec<L>) -> Self {
+    pub fn new_with_lookup_table(lookup_tables: Vec<Box<dyn LookupTable<E::Fr>>>) -> Self {
         let tmp = Self {
             n: 0,
             m: 0,
@@ -187,8 +187,6 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>,L: LookupTable<E::Fr>> Generat
 
         tmp
     }
-
-
 
     // return variable that is not in a constraint formally, but has some value
     fn dummy_variable(&self) -> Variable {
@@ -236,10 +234,10 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>,L: LookupTable<E::Fr>> Generat
 // later we can alias traits
 // pub trait PlonkCsWidth3WithNextStep<E: Engine> = ConstraintSystem<E, PlonkCsWidth3WithNextStepParams>;
 
-pub type GeneratorAssembly3WithNextStep<E, L> = GeneratorAssembly<E, PlonkCsWidth3WithNextStepParams, L>;
-pub type GeneratorAssembly4WithNextStep<E, L> = GeneratorAssembly<E, PlonkCsWidth4WithNextStepParams, L>;
+pub type GeneratorAssembly3WithNextStep<E> = GeneratorAssembly<E, PlonkCsWidth3WithNextStepParams>;
+pub type GeneratorAssembly4WithNextStep<E> = GeneratorAssembly<E, PlonkCsWidth4WithNextStepParams>;
 
-impl<E: Engine, L: LookupTable<E::Fr>> GeneratorAssembly4WithNextStep<E, L> {
+impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
     pub fn make_selector_polynomials(
         &self, 
         worker: &Worker
@@ -295,9 +293,9 @@ impl<E: Engine, L: LookupTable<E::Fr>> GeneratorAssembly4WithNextStep<E, L> {
                     .zip(q_c_aux.chunks_mut(chunk))
                     .zip(q_d_aux.chunks_mut(chunk))
                     .zip(q_m_aux.chunks_mut(chunk))
-                    .zip(q_const_aux.chunks_mut(chunk))
                     .zip(q_lookup_aux.chunks_mut(chunk))
                     .zip(q_lookup_index_aux.chunks_mut(chunk))
+                    .zip(q_const_aux.chunks_mut(chunk))
                     .zip(q_d_next_aux.chunks_mut(chunk))
             {
                 scope.spawn(move |_| {
@@ -308,9 +306,9 @@ impl<E: Engine, L: LookupTable<E::Fr>> GeneratorAssembly4WithNextStep<E, L> {
                             .zip(q_c.iter_mut())
                             .zip(q_d.iter_mut())
                             .zip(q_m.iter_mut())
-                            .zip(q_const.iter_mut())
                             .zip(q_lookup.iter_mut())
                             .zip(q_lookup_index.iter_mut())
+                            .zip(q_const.iter_mut())
                             .zip(q_d_next.iter_mut())
                         {
                             *q_a = gate.1[0];
@@ -502,9 +500,9 @@ impl<E: Engine, L: LookupTable<E::Fr>> GeneratorAssembly4WithNextStep<E, L> {
         let q_m = q_m.ifft(&worker);
         let q_const = q_const.ifft(&worker);
         let q_lookup = q_lookup.ifft(&worker);
-        let q_lookup_index = q_lookup_index.ifft(&worker);
         println!("q lookup indexes in generator"); // TODO
         q_lookup_index.as_ref().iter().for_each(|e| println!("{}", e));
+        let q_lookup_index = q_lookup_index.ifft(&worker);
 
         let q_d_next = q_d_next.ifft(&worker);
 
@@ -615,7 +613,7 @@ mod test {
 
 
 
-        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new();
+        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256>::new();
 
         let circuit = TestCircuit4::<Bn256> {
             _marker: PhantomData

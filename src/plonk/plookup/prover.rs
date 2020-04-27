@@ -23,12 +23,9 @@ use super::LDE_FACTOR;
 use super::lookup_table::{LookupTable, TableType};
 
 // #[derive(Debug, Clone)]
-pub struct ProverAssembly<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> {
+pub struct ProverAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
     m: usize,
     n: usize,
-    // input_gates: Vec<(P::StateVariables, P::ThisTraceStepCoefficients, P::NextTraceStepCoefficients)>,
-    // aux_gates: Vec<(P::StateVariables, P::ThisTraceStepCoefficients, P::NextTraceStepCoefficients)>,
-
     num_inputs: usize,
     num_aux: usize,
     num_lookups: usize,
@@ -38,23 +35,19 @@ pub struct ProverAssembly<E: Engine, P: PlonkConstraintSystemParams<E>, L: Looku
 
     wire_assignments: Vec<Vec<E::Fr>>,
 
-    // aux_densities: Vec<DensityTracker>,
-
     inputs_map: Vec<usize>,
     dummy_var: Variable,
 
     is_finalized: bool,
 
-    lookup_tables: Vec<L>,
-
-    lookup_tables_trait_objects: Vec<Box<dyn LookupTable<E::Fr>>>,
+    lookup_tables: Vec<Box<dyn LookupTable<E::Fr>>>,
 
     is_table_initialized: bool,
 
     _marker: std::marker::PhantomData<P>
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> ConstraintSystem<E, P> for ProverAssembly<E, P, L> {
+impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for ProverAssembly<E, P> {
     // allocate a variable
     fn alloc<F>(&mut self, value: F) -> Result<Variable, SynthesisError>
     where
@@ -160,16 +153,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> Constr
         }
 
         return Err(SynthesisError::Unsatisfiable);
-        
-        // if !is_table_found{
-        //     return Err(SynthesisError::Unsatisfiable)
-        // }
 
-   
     }
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> ProverAssembly<E, P, L> {
+impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
     pub fn new() -> Self {
         let tmp = Self {
             n: 0,
@@ -192,7 +180,6 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> Prover
             is_finalized: false,
 
             lookup_tables: vec![],
-            lookup_tables_trait_objects: vec![],
             is_table_initialized: false,
 
             _marker: std::marker::PhantomData
@@ -223,7 +210,6 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> Prover
             is_finalized: false,
 
             lookup_tables: vec![],
-            lookup_tables_trait_objects: vec![],
             is_table_initialized: false,
 
             _marker: std::marker::PhantomData
@@ -232,7 +218,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> Prover
         tmp
     }
     
-    pub fn new_with_lookup_table(lookup_tables: Vec<L>) -> Self {
+    pub fn new_with_lookup_table(lookup_tables: Vec<Box<dyn LookupTable<E::Fr>>>) -> Self {
         let tmp = Self {
             n: 0,
             m: 0,
@@ -246,29 +232,6 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> Prover
             dummy_var: Variable(Index::Aux(0)),
             is_finalized: false,
             lookup_tables: lookup_tables,
-            lookup_tables_trait_objects: vec![],
-            is_table_initialized: true,
-
-            _marker: std::marker::PhantomData
-        };
-
-        tmp
-    }
-    pub fn new_with_lookup_table_traits(lookup_tables: Vec<Box<dyn LookupTable<E::Fr>>>) -> Self {
-        let tmp = Self {
-            n: 0,
-            m: 0,
-            num_inputs: 0,
-            num_aux: 0,
-            num_lookups: 0,
-            input_assingments: vec![],
-            aux_assingments: vec![],
-            wire_assignments: vec![vec![]; P::STATE_WIDTH],
-            inputs_map: vec![],
-            dummy_var: Variable(Index::Aux(0)),
-            is_finalized: false,
-            lookup_tables: vec![],
-            lookup_tables_trait_objects: lookup_tables,
             is_table_initialized: true,
 
             _marker: std::marker::PhantomData
@@ -318,22 +281,9 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> Prover
         self.is_finalized = true;
     }
 
-    pub fn get_lookup_tables(&self) -> Vec<L>{
-        // let mut tables = vec![];
-        // 
-        // self.lookup_tables
-        // TODO
-        vec![]
-// 
-        // for i in 0..self.lookup_tables.to_vec().len({
-        //     tables.push(self.lookup_tables[i].owned());
-        // }
-        // self.lookup_tables.clone()
-        // tables
-    }
-    pub fn make_witness_polynomials(
+    pub fn get_witness_polynomials_and_tables(
         self
-    ) -> Result<Vec<Vec<E::Fr>>, SynthesisError>
+    ) -> Result<(Vec<Vec<E::Fr>>, Vec<Box<dyn LookupTable<E::Fr>>>), SynthesisError>
     {
         assert!(self.is_finalized);
 
@@ -356,8 +306,11 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, L: LookupTable<E::Fr>> Prover
             assert_eq!(a.len(), (self.n+1).next_power_of_two() - 1);
         }
 
-        Ok(full_assignments)
+        let lookup_tables = self.lookup_tables;
+
+        Ok((full_assignments, lookup_tables))
     }
+
 }
 
 
@@ -439,10 +392,10 @@ impl<E: Engine> Ord for MultiSet<E>{
 // later we can alias traits
 // pub trait PlonkCsWidth3WithNextStep<E: Engine> = ConstraintSystem<E, PlonkCsWidth3WithNextStepParams>;
 
-pub type ProverAssembly3WithNextStep<E,L> = ProverAssembly<E, PlonkCsWidth3WithNextStepParams, L>;
-pub type ProverAssembly4WithNextStep<E,L> = ProverAssembly<E, PlonkCsWidth4WithNextStepParams, L>;
+pub type ProverAssembly3WithNextStep<E> = ProverAssembly<E, PlonkCsWidth3WithNextStepParams>;
+pub type ProverAssembly4WithNextStep<E> = ProverAssembly<E, PlonkCsWidth4WithNextStepParams>;
 
-impl<E: Engine, L: LookupTable<E::Fr>> ProverAssembly4WithNextStep<E, L> {
+impl<E: Engine> ProverAssembly4WithNextStep<E> {
     pub fn prove<T: Transcript<E::Fr>, CP: CTPrecomputations<E::Fr>, CPI: CTPrecomputations<E::Fr>>(
         self, 
         worker: &Worker, 
@@ -472,12 +425,11 @@ impl<E: Engine, L: LookupTable<E::Fr>> ProverAssembly4WithNextStep<E, L> {
         let required_domain_size = n + 1;
         assert!(required_domain_size.is_power_of_two()); 
         
-        let lookup_tables = self.get_lookup_tables();
-
+        
         let num_lookup_gates = self.num_lookups;
-
-        let full_assignments = self.make_witness_polynomials()?;
-
+        
+        let (full_assignments, lookup_tables) = self.get_witness_polynomials_and_tables()?;
+        
 
         let mut proof = Proof::<E, PlonkCsWidth4WithNextStepParams>::empty();
         proof.n = n;
@@ -678,6 +630,7 @@ impl<E: Engine, L: LookupTable<E::Fr>> ProverAssembly4WithNextStep<E, L> {
             // construct s = (f,t) sorted by t
             // s = lookup_gates_len + lookup_table_len + padding_len
             // after sorting all padding will gi up to top
+            let mut i = 0;
             let mut s_vec = vec![MultiSet::<E>::new(); required_domain_size];
             for (((((s,l),r), o), lookup), table_index) in s_vec.iter_mut()
                     .zip(full_assignments[0].iter())
@@ -686,13 +639,18 @@ impl<E: Engine, L: LookupTable<E::Fr>> ProverAssembly4WithNextStep<E, L> {
                     .zip(lookup_gate_selector.as_ref().iter())
                     .zip(table_selector.as_ref().iter()){
                 if *lookup == E::Fr::one(){
+                    println!("witness table index {}", table_index);
                     *s = MultiSet::from_vec([*l, *r, *o, *table_index]);
+                    i += 1 ;
                 }
             }
+            
+            assert_eq!(i, num_lookup_gates);
 
             let s_mut = &mut s_vec[(required_domain_size-num_lookup_gates)..];
             for lookup_table in lookup_tables.iter(){
                 for (s, t) in s_mut.iter_mut().zip(lookup_table.iter()){
+                    println!("table index {}", lookup_table.lookup_type_as_fe());
                     *s  = MultiSet::from_vec([t.0, t.1, t.2, lookup_table.lookup_type_as_fe()]);
                 }
             }
@@ -749,7 +707,7 @@ impl<E: Engine, L: LookupTable<E::Fr>> ProverAssembly4WithNextStep<E, L> {
             let mut t2_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
             let mut t3_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
             let mut t4_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
-            for (table_index, lookup_table) in lookup_tables.iter().enumerate(){
+            for lookup_table in lookup_tables.iter(){
                 for row in lookup_table.iter(){
                     t1_values.push(row.0);
                     t2_values.push(row.1);
@@ -1446,13 +1404,19 @@ mod test {
         use crate::plonk::plookup::lookup_table::{XorTable, AndTable};
 
         let bit_size = 2;
-        let tables = vec![
-            XorTable::<Fr>::new(bit_size),
-        ];
+ 
+        let xor_table = XorTable::<Fr>::new(bit_size);
+        let and_table = XorTable::<Fr>::new(bit_size*bit_size);
 
-        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new_with_lookup_table(tables.clone());
+        let mut lookup_tables = Vec::<Box<dyn LookupTable<Fr>>>::new();
+        lookup_tables.push(Box::new(xor_table.clone()));
+        // lookup_tables.push(Box::new(and_table.clone()));
 
-        // let mut assembly2 = GeneratorAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new_with_lookup_table_traits(tables_with_traits);
+        let mut lookup_tables2 = Vec::<Box<dyn LookupTable<Fr>>>::new();
+        lookup_tables2.push(Box::new(xor_table));
+        // lookup_tables2.push(Box::new(and_table));
+
+        let mut assembly = GeneratorAssembly4WithNextStep::<Bn256>::new_with_lookup_table(lookup_tables2);
 
         let circuit = TestCircuit4::<Bn256> {
             _marker: PhantomData
@@ -1485,16 +1449,8 @@ mod test {
             &worker
         ).unwrap();
 
+        let mut assembly = ProverAssembly4WithNextStep::<Bn256>::new_with_lookup_table(lookup_tables);  // TODO 
     
-
-        let mut assembly = ProverAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new_with_lookup_table(tables);  // TODO 
-
-        let tables_with_traits = vec![
-            Box::new(XorTable::<Fr>::new(bit_size))
-        ];
-        // let mut assembl2 = ProverAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new_with_lookup_table_traits(tables_with_traits);  // TODO 
-        
-
         circuit.clone().synthesize(&mut assembly).expect("must work");
 
         assembly.finalize();

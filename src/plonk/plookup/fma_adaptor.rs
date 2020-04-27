@@ -2411,7 +2411,7 @@ fn transpile_xor_using_fma_adaptor() {
     println!("Transpiled into {} gates", num_gates);
 
     let adapted_curcuit = AdaptorCircuit::<Bn256, PlonkCsWidth4WithNextStepParams, _>::new(c.clone(), &hints);
-    let mut assembly = GeneratorAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new();
+    let mut assembly = GeneratorAssembly4WithNextStep::<Bn256>::new();
     adapted_curcuit.synthesize(&mut assembly).expect("sythesize of transpiled into CS must succeed");
     assembly.finalize();
 
@@ -2433,7 +2433,7 @@ fn transpile_xor_using_fma_adaptor() {
         &worker
     ).unwrap();
 
-    let mut assembly = ProverAssembly4WithNextStep::<Bn256, XorTable<Fr>>::new();
+    let mut assembly = ProverAssembly4WithNextStep::<Bn256>::new();
 
     let adapted_curcuit = AdaptorCircuit::<Bn256, PlonkCsWidth4WithNextStepParams, _>::new(c.clone(), &hints);
 

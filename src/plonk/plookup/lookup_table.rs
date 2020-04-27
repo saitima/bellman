@@ -2,15 +2,15 @@ use crate::pairing::ff::PrimeField;
 use std::fmt;
 
 pub enum TableType{
-    XOR = 0,
-    AND = 1,
+    XOR = 1,
+    AND = 2,
 }
 
 impl fmt::Display for TableType{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { 
         let type_as_int = match self{
-            Self::XOR => 0,
-            Self::AND => 1,
+            Self::XOR => 1,
+            Self::AND => 2,
         };
         write!(f, "{}", type_as_int)
      }

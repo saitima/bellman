@@ -199,7 +199,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomialsPrecomputatio
         // let coset_generator = E::Fr::one();
 
         // we do not precompute q_const as we need to use it for public inputs;
-        let selector_q_const_index = setup.selector_polynomials.len()-2;
+        let selector_q_const_index = setup.selector_polynomials.len()-3;
         for (i, p) in setup.selector_polynomials.iter().enumerate() {
             if i == selector_q_const_index{
                 // println!("skipipng const poly");
