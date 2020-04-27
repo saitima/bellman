@@ -94,6 +94,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Ge
 
     fn read_from_table(&mut self, table_type: TableType, _a: Variable, _b: Variable) -> Result<Variable, SynthesisError>{
         assert!(self.is_table_initialized);
+
         let mut lookup_type_as_fe = E::Fr::zero();
         let mut is_table_found = false;
         for t in self.lookup_tables.iter(){
@@ -102,7 +103,6 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Ge
                 is_table_found = true;
                 break;
             }
-            
         }
         if !is_table_found{
             return Err(SynthesisError::Unsatisfiable)
@@ -115,6 +115,8 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Ge
         let this_step_coeffs = P::ThisTraceStepCoefficients::from_coeffs(&coeffs);
         let next_step_coeffs = P::NextTraceStepCoefficients::empty();
         self.new_gate(variables, this_step_coeffs, next_step_coeffs)?;
+        self.num_lookups += 1;
+
         Ok(self.get_dummy_variable())
     }
 }
@@ -208,7 +210,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
             table_size += table.size();
         }
 
-
+        
         let lookup_gates = self.num_lookups;
         let filled_gates = self.n + self.num_inputs;
         let n = filled_gates.max(table_size + lookup_gates);
@@ -226,6 +228,8 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
                 P::NextTraceStepCoefficients::empty(),
             ).unwrap(); // TODO: change func signature to handle Result?
         }
+
+        println!("generator gates {}", self.n);
 
         self.is_finalized = true;
     }   
@@ -254,7 +258,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let mut q_m = vec![E::Fr::zero(); total_num_gates];
         let mut q_const = vec![E::Fr::zero(); total_num_gates];
         let mut q_lookup = vec![E::Fr::zero(); total_num_gates];
-        let mut q_lookup_index = vec![E::Fr::zero(); total_num_gates];
+        let mut q_table_index = vec![E::Fr::zero(); total_num_gates];
 
         let mut q_d_next = vec![E::Fr::zero(); total_num_gates];
 
@@ -279,14 +283,14 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let q_m_aux = &mut q_m[num_input_gates..];
         let q_const_aux = &mut q_const[num_input_gates..];
         let q_lookup_aux = &mut q_lookup[num_input_gates..];
-        let q_lookup_index_aux = &mut q_lookup_index[num_input_gates..];
+        let q_lookup_index_aux = &mut q_table_index[num_input_gates..];
 
         let q_d_next_aux = &mut q_d_next[num_input_gates..];
 
         debug_assert!(self.aux_gates.len() == q_a_aux.len());
 
         worker.scope(self.aux_gates.len(), |scope, chunk| {
-            for (((((((((gate, q_a), q_b), q_c), q_d), q_m), q_lookup),q_lookup_index), q_const), q_d_next) 
+            for (((((((((gate, q_a), q_b), q_c), q_d), q_m), q_lookup),q_table_index), q_const), q_d_next) 
                 in self.aux_gates.chunks(chunk)
                     .zip(q_a_aux.chunks_mut(chunk))
                     .zip(q_b_aux.chunks_mut(chunk))
@@ -299,7 +303,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
                     .zip(q_d_next_aux.chunks_mut(chunk))
             {
                 scope.spawn(move |_| {
-                    for (((((((((gate, q_a), q_b), q_c), q_d), q_m), q_lookup), q_lookup_index), q_const), q_d_next) 
+                    for (((((((((gate, q_a), q_b), q_c), q_d), q_m), q_lookup), q_table_index), q_const), q_d_next) 
                     in gate.iter()
                             .zip(q_a.iter_mut())
                             .zip(q_b.iter_mut())
@@ -307,7 +311,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
                             .zip(q_d.iter_mut())
                             .zip(q_m.iter_mut())
                             .zip(q_lookup.iter_mut())
-                            .zip(q_lookup_index.iter_mut())
+                            .zip(q_table_index.iter_mut())
                             .zip(q_const.iter_mut())
                             .zip(q_d_next.iter_mut())
                         {
@@ -318,7 +322,7 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
                             *q_m = gate.1[4];
                             *q_const = gate.1[5];
                             *q_lookup = gate.1[6];
-                            *q_lookup_index = gate.1[7];
+                            *q_table_index = gate.1[7];
 
                             *q_d_next = gate.2[0];
                         }
@@ -333,13 +337,13 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let q_m = Polynomial::from_values(q_m)?;
         let q_const = Polynomial::from_values(q_const)?;
         let q_lookup = Polynomial::from_values(q_lookup)?;
-        let q_lookup_index = Polynomial::from_values(q_lookup_index)?;
+        let q_table_index = Polynomial::from_values(q_table_index)?;
 
         // q_lookup.as_ref().iter().for_each(|e| println!("{}", e));
 
         let q_d_next = Polynomial::from_values(q_d_next)?;
 
-        Ok(([q_a, q_b, q_c, q_d, q_m, q_const, q_lookup, q_lookup_index], [q_d_next]))
+        Ok(([q_a, q_b, q_c, q_d, q_m, q_const, q_lookup, q_table_index], [q_d_next]))
     }
 
     pub(crate) fn make_permutations(&self, worker: &Worker) -> [Polynomial::<E::Fr, Values>; 4] {
@@ -475,6 +479,38 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         [sigma_1, sigma_2, sigma_3, sigma_4]
     }
 
+    pub fn make_lookup_table_polynomials(&self) -> Result<Vec<Polynomial<E::Fr, Values>>, SynthesisError>{
+        let required_domain_size  = self.n + 1;
+
+        let mut total_row_count = 0;
+
+        for lookup_table in self.lookup_tables.iter(){
+            total_row_count += lookup_table.size();
+        }
+
+        // pad zeroes on top
+        let mut t1_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
+        let mut t2_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
+        let mut t3_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
+        let mut t4_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
+
+        for lookup_table in self.lookup_tables.iter(){
+            for row in lookup_table.iter(){
+                t1_values.push(row.0);
+                t2_values.push(row.1);
+                t3_values.push(row.2);
+                t4_values.push(lookup_table.lookup_type_as_fe());
+            }
+        }
+
+        let t1 = Polynomial::from_values(t1_values)?;
+        let t2 = Polynomial::from_values(t2_values)?;
+        let t3 = Polynomial::from_values(t3_values)?;
+        let t4 = Polynomial::from_values(t4_values)?;
+
+        Ok(vec![t1, t2, t3, t4])
+    }
+
     pub fn setup(self, worker: &Worker) -> Result<SetupPolynomials<E, PlonkCsWidth4WithNextStepParams>, SynthesisError> {
         assert!(self.is_finalized);
 
@@ -483,8 +519,11 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
 
         let [sigma_1, sigma_2, sigma_3, sigma_4] = self.make_permutations(&worker);
 
-        let ([q_a, q_b, q_c, q_d, q_m,q_const, q_lookup, q_lookup_index],
+        let ([q_a, q_b, q_c, q_d, q_m,q_const, q_lookup, q_table_index],
             [q_d_next]) = self.make_selector_polynomials(&worker)?;
+
+        let lookup_table_polynomials = self.make_lookup_table_polynomials()?;
+
 
         drop(self);
 
@@ -500,18 +539,20 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         let q_m = q_m.ifft(&worker);
         let q_const = q_const.ifft(&worker);
         let q_lookup = q_lookup.ifft(&worker);
-        println!("q lookup indexes in generator"); // TODO
-        q_lookup_index.as_ref().iter().for_each(|e| println!("{}", e));
-        let q_lookup_index = q_lookup_index.ifft(&worker);
+        let q_table_index = q_table_index.ifft(&worker);
 
         let q_d_next = q_d_next.ifft(&worker);
+
+        
 
         let setup = SetupPolynomials::<E, PlonkCsWidth4WithNextStepParams> {
             n,
             num_inputs,
-            selector_polynomials: vec![q_a, q_b, q_c, q_d, q_m, q_const, q_lookup, q_lookup_index],
+            selector_polynomials: vec![q_a, q_b, q_c, q_d, q_m, q_const, q_lookup, q_table_index],
             next_step_selector_polynomials: vec![q_d_next],
             permutation_polynomials: vec![sigma_1, sigma_2, sigma_3, sigma_4],
+
+            lookup_table_polynomials: lookup_table_polynomials,
         
             _marker: std::marker::PhantomData
         };

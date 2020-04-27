@@ -1,6 +1,7 @@
 use crate::pairing::ff::PrimeField;
 use std::fmt;
 
+#[derive(Clone)]
 pub enum TableType{
     XOR = 1,
     AND = 2,

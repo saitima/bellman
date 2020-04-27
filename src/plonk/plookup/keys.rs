@@ -21,6 +21,7 @@ pub struct SetupPolynomials<E: Engine, P: PlonkConstraintSystemParams<E>> {
     pub selector_polynomials: Vec<Polynomial<E::Fr, Coefficients>>,
     pub next_step_selector_polynomials: Vec<Polynomial<E::Fr, Coefficients>>,
     pub permutation_polynomials: Vec<Polynomial<E::Fr, Coefficients>>,
+    pub lookup_table_polynomials: Vec<Polynomial<E::Fr, Values>>,
 
     pub(crate) _marker: std::marker::PhantomData<P>,
 }
@@ -149,6 +150,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomials<E, P> {
             selector_polynomials: selectors,
             next_step_selector_polynomials: next_step_selectors,
             permutation_polynomials: permutation_polys,
+            lookup_table_polynomials: vec![], // TODO
 
             _marker: std::marker::PhantomData,
         };
@@ -535,6 +537,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> VerificationKey<E, P> {
             let commitment = commit_using_monomials(p, &crs, &worker)?;
             new.permutation_commitments.push(commitment);
         }
+        // TODO: commit to table and gate polynomials
 
         let domain = Domain::<E::Fr>::new_for_size(setup.n.next_power_of_two() as u64)?;
         new.non_residues
