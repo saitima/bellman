@@ -113,26 +113,6 @@ impl StateVariablesSet for [Variable; 4] {
     }
 }
 
-// impl<E: Engine> TraceStepCoefficients<E> for () {
-//     fn empty() -> Self {
-//         ()
-//     }
-//     fn identity() -> Self {
-//         ()
-//     }
-//     fn from_coeffs(coeffs: &[E::Fr]) -> Self {
-//         debug_assert_eq!(coeffs.len(), 0);
-
-//         ()
-//     }
-// }
-
-// impl<E: Engine> AsRef<[E::Fr]> for () {
-//     fn as_ref(&self) -> &[E::Fr] {
-//         &[]
-//     }
-// }
-
 impl<E: Engine> TraceStepCoefficients<E> for [E::Fr; 0] {
     fn empty() -> Self {
         []
@@ -282,6 +262,25 @@ impl<E: Engine> TraceStepCoefficients<E> for [E::Fr; 8] {
     }
 }
 
+impl<E: Engine> TraceStepCoefficients<E> for [E::Fr; 9] {
+    fn empty() -> Self {
+        [E::Fr::zero(); 9]
+    }
+    fn identity() -> Self {
+        [E::Fr::one(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero(), E::Fr::zero()]
+    }
+    fn negate(&mut self) {
+        for c in self.iter_mut() {
+            c.negate();
+        }
+    }
+    fn from_coeffs(coeffs: &[E::Fr]) -> Self {
+        debug_assert_eq!(coeffs.len(), 9);
+
+        [coeffs[0], coeffs[1], coeffs[2], coeffs[3], coeffs[4], coeffs[5], coeffs[6], coeffs[7], coeffs[8]]
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PlonkCsWidth3WithNextStepParams;
 impl<E: Engine> PlonkConstraintSystemParams<E> for PlonkCsWidth3WithNextStepParams {
@@ -304,7 +303,7 @@ impl<E: Engine> PlonkConstraintSystemParams<E> for PlonkCsWidth4WithNextStepPara
     const CAN_ACCESS_NEXT_TRACE_STEP: bool =  true;
 
     type StateVariables = [Variable; 4];
-    type ThisTraceStepCoefficients = [E::Fr; 8];
+    type ThisTraceStepCoefficients = [E::Fr; 9];
     type NextTraceStepCoefficients = [E::Fr; 1];
 
     type CustomGateType = NoCustomGate;

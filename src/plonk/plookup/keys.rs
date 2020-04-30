@@ -22,6 +22,7 @@ pub struct SetupPolynomials<E: Engine, P: PlonkConstraintSystemParams<E>> {
     pub next_step_selector_polynomials: Vec<Polynomial<E::Fr, Coefficients>>,
     pub permutation_polynomials: Vec<Polynomial<E::Fr, Coefficients>>,
     pub lookup_table_polynomials: Vec<Polynomial<E::Fr, Values>>,
+    pub range_table_polynomials: Vec<Polynomial<E::Fr, Values>>,
 
     pub(crate) _marker: std::marker::PhantomData<P>,
 }
@@ -151,6 +152,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomials<E, P> {
             next_step_selector_polynomials: next_step_selectors,
             permutation_polynomials: permutation_polys,
             lookup_table_polynomials: vec![], // TODO
+            range_table_polynomials: vec![], // TODO
 
             _marker: std::marker::PhantomData,
         };
@@ -301,6 +303,7 @@ pub struct Proof<E: Engine, P: PlonkConstraintSystemParams<E>> {
     pub input_values: Vec<E::Fr>,
     pub wire_commitments: Vec<E::G1Affine>,
     pub grand_product_commitment: E::G1Affine,
+    pub plookup_grand_product_commitment: E::G1Affine,
     pub quotient_poly_commitments: Vec<E::G1Affine>,
 
     pub wire_values_at_z: Vec<E::Fr>,
@@ -326,6 +329,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> Proof<E, P> {
             input_values: vec![],
             wire_commitments: vec![],
             grand_product_commitment: E::G1Affine::zero(),
+            plookup_grand_product_commitment: E::G1Affine::zero(),
             quotient_poly_commitments: vec![],
             wire_values_at_z: vec![],
             wire_values_at_z_omega: vec![],
@@ -466,6 +470,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> Proof<E, P> {
             input_values: inputs,
             wire_commitments: wire_commitments,
             grand_product_commitment: grand_product_commitment,
+            plookup_grand_product_commitment: CurveAffine::zero(),
             quotient_poly_commitments: quotient_poly_commitments,
             wire_values_at_z: wire_values_at_z,
             wire_values_at_z_omega: wire_values_at_z_omega,
@@ -504,7 +509,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> VerificationKey<E, P> {
         worker: &Worker,
         crs: &Crs<E, CrsForMonomialForm>,
     ) -> Result<Self, SynthesisError> {
-        assert_eq!(setup.selector_polynomials.len(), P::STATE_WIDTH + 4 );
+        assert_eq!(setup.selector_polynomials.len(), P::STATE_WIDTH + 5 );
         if P::CAN_ACCESS_NEXT_TRACE_STEP == false {
             assert_eq!(setup.next_step_selector_polynomials.len(), 0);
         }
