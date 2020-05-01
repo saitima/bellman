@@ -653,10 +653,17 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         let mut unpadded_table_selector_evals = vec![];
         unpadded_table_selector_evals.extend_from_slice(&table_selector.as_ref()[..n]);
         let unpadded_table_selector = Polynomial::from_values_unpadded(unpadded_table_selector_evals)?;
+        // drop(unpadded_table_selector_evals);
         
         let mut unpadded_lookup_selector_evals = vec![];
         unpadded_lookup_selector_evals.extend_from_slice(&lookup_gate_selector.as_ref()[..n]);
         let unpadded_lookup_selector = Polynomial::from_values_unpadded(unpadded_lookup_selector_evals)?;
+        // drop(unpadded_lookup_selector_evals);
+        
+        let mut unpadded_range_selector_evals = vec![];
+        unpadded_range_selector_evals.extend_from_slice(&range_lookup_gate_selector.as_ref()[..n]);
+        let unpadded_range_selector = Polynomial::from_values_unpadded(unpadded_range_selector_evals)?;
+        // drop(unpadded_range_selector_evals);
 
 
 
@@ -827,8 +834,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 shiftted_s_original_poly.distribute_powers(&worker, s_omega);
                 let shiftted_s_original = shiftted_s_original_poly.fft(&worker);
 
-
-
                 for i in 0..n{
                     let mut witness_part = gamma.clone();
                     witness_part.add_assign(&new_witness_original[i]);
@@ -885,33 +890,34 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
             // calculate plookup quotient polynomnial
 
-            // lhs = Z(x*omega) * (\gamma (1 + \beta) + s(x) + \beta * s(x*omega) 
-            // rhs = Z(x)* (\beta + 1) * (\gamma + f(x)) * (\gamma(1 + \beta) + t(x) + \beta * t(x*omega)
+            // lhs = Z(x)* (\beta + 1) * (\gamma + f(x)) * (\gamma(1 + \beta) + t(x) + \beta * t(x*omega)
+            // rhs = Z(x*omega) * (\gamma (1 + \beta) + s(x) + \beta * s(x*omega) 
             // lhs - rhs = 0 mod Zh
             // t = (lhs - rhs)/Zh
-            let plookup_lhs = {
-                let mut lhs = shifted_s_poly.clone();
-                lhs.scale(&worker, beta);
-                lhs.add_assign(&worker, &s_poly);
-                lhs.add_constant(&worker, &gamma_beta_one);
-                lhs.mul_assign(&worker, &plookup_shifted_z);
-
-                lhs
-            };
-
-            let  plookup_rhs = {        
-                let mut rhs = witness_poly.clone();
-                rhs.add_constant(&worker, &gamma);
+            let  plookup_lhs = {        
+                let mut lhs = witness_poly.clone();
+                lhs.add_constant(&worker, &gamma);
                 let mut shifted_table_poly = shifted_table_poly.clone();
                 shifted_table_poly.scale(&worker, beta);
                 shifted_table_poly.add_assign(&worker, &table_poly);
                 shifted_table_poly.add_constant(&worker, &gamma_beta_one);
-                rhs.mul_assign(&worker, &shifted_table_poly);
-                rhs.scale(&worker, beta_one);
-                rhs.mul_assign(&worker, &plookup_z);
+                lhs.mul_assign(&worker, &shifted_table_poly);
+                lhs.scale(&worker, beta_one);
+                lhs.mul_assign(&worker, &plookup_z);
                 
+                lhs
+            };
+            
+            let plookup_rhs = {
+                let mut rhs = shifted_s_poly.clone();
+                rhs.scale(&worker, beta);
+                rhs.add_assign(&worker, &s_poly);
+                rhs.add_constant(&worker, &gamma_beta_one);
+                rhs.mul_assign(&worker, &plookup_shifted_z);
+
                 rhs
             };
+
 
             assert_eq!(plookup_lhs.size(), new_domain_size);
             assert_eq!(plookup_rhs.size(), new_domain_size);
@@ -931,8 +937,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             // plookup_t_poly.as_ref().iter().enumerate().for_each(|(i, e)| println!("{} {}", i, e));
             
         }
-        unreachable!();
-
+        
         {
             // range lookup         
             assert!(num_range_lookups > 0);
@@ -949,7 +954,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 // we store table index of gates in a single vector, 
                 // so gates need to be filtered out by its table index  
 
-                let mut s_vec: Vec<MultiSet<E>> = vec![MultiSet::new(); required_domain_size - total_row_size -1];
+                let mut s_vec: Vec<MultiSet<E>> = vec![MultiSet::new(); n - total_row_size];
                 // let mut s_vec: Vec<MultiSet<E>> = vec![];
 
                 for lookup_table in range_lookup_tables{
@@ -975,17 +980,16 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
                 let s_values: Vec<E::Fr> = s_vec.iter().map(|m| m.scale_and_sum(plookup_challenge)).collect();
                 
-                let s = Polynomial::from_values_unpadded(s_values)?;
+                let s_original = Polynomial::from_values_unpadded(s_values)?;
 
-                let s_original = s.clone_padded_to_domain()?;
+                let s_monomial = s_original.clone_padded_to_domain()?.ifft(worker);
 
-                let s_monomial = s.ifft(worker);                
                 let s = s_monomial.coset_lde(worker,plookup_lde_factor)?;
                 
                 (s, s_original)
             };
 
-            let (witness_poly, witness_original, range_lookup_original) = {
+            let (witness_poly, witness_original) = {
                 // f(x) = (a(x) + b(x)*plookup_challenge + c(x)*plookup_challenge^2 + index(x)*plookup_challenge^3) * q_lookup(x)
                 let mut witness_poly = assignment_polynomials[0].clone();
                 let mut bx = assignment_polynomials[1].clone();
@@ -994,30 +998,29 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 let mut cx= assignment_polynomials[2].clone();
                 cx.scale(&worker, plookup_challenge_square);        
                 witness_poly.add_assign(&worker, &cx);
-                let mut dx = table_selector.clone();
+                let mut dx  = unpadded_table_selector.clone();
                 dx.scale(&worker, plookup_challenge_cube);
                 witness_poly.add_assign(&worker, &dx);
                 
                 let mut witness_original_evals = vec![];
                 witness_original_evals.extend_from_slice(witness_poly.as_ref());
-                witness_original_evals.extend_from_slice(&vec![E::Fr::zero(); required_domain_size - witness_poly.as_ref().len() -1 ]);                
+                witness_original_evals.extend_from_slice(&vec![E::Fr::zero(); n - witness_poly.as_ref().len()]);                
                 let witness_original = Polynomial::from_values_unpadded(witness_original_evals)?;                
                 
                 let mut witness_poly = witness_poly.clone_padded_to_domain()?.ifft(worker).coset_lde(worker, plookup_lde_factor)?;            
 
-                let range_lookup_original = range_lookup_gate_selector.clone();
 
                 let range_lookup_poly = range_lookup_gate_selector_poly.coset_lde(worker, plookup_lde_factor)?;
                 witness_poly.mul_assign(&worker, &range_lookup_poly);
                 
                 
-                (witness_poly,witness_original, range_lookup_original)
+                (witness_poly,witness_original)
 
             };
 
             let (table_poly, table_original) = {
                 // t(x) = t_1(x) + t_2(x)*plookup_challenge + t_3(x)* plookup_challenge^2  + table_index*plookup_challenge^3
-                assert_eq!(setup.lookup_table_polynomials.len(), 4);
+                assert_eq!(setup.range_table_polynomials.len(), 4);
 
                 let mut range_lookup_table_polynomials = setup.range_table_polynomials.iter().cloned();
 
@@ -1033,13 +1036,13 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
                 let mut table_original_evals = vec![];                
                 table_original_evals.extend_from_slice(table_poly.as_ref());
-                table_original_evals.extend_from_slice(&vec![E::Fr::zero(); s_original.as_ref().len() - table_poly.as_ref().len() -1]);
+                table_original_evals.extend_from_slice(&vec![E::Fr::zero(); n - table_poly.as_ref().len()]);
 
                 let table_original = Polynomial::from_values_unpadded(table_original_evals)?;
 
-                let table_poly = table_poly.clone_padded_to_domain()?.ifft(worker);
+                let table_poly_monomial = table_poly.clone_padded_to_domain()?.ifft(worker);
 
-                let table_poly = table_poly.coset_lde(worker, plookup_lde_factor)?;
+                let table_poly = table_poly_monomial.coset_lde(worker, plookup_lde_factor)?;
                 
                 (table_poly, table_original)
             };        
@@ -1049,26 +1052,21 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 let mut new_witness_original = vec![];
 
                 // collect witness assignments of range gates, order does not matter
-                // witness_original.as_ref().iter().for_each(|e| println!("{}", e));
-
-                assert_eq!(witness_original.as_ref().len(), range_lookup_original.as_ref().len());
+                assert_eq!(witness_original.as_ref().len(), unpadded_range_selector.as_ref().len());
 
                 for (witness, lookup) in witness_original.as_ref().iter()
-                                        .zip(range_lookup_original.as_ref().iter()){
+                                        .zip(unpadded_range_selector.as_ref().iter()){
                     if *lookup == E::Fr::one(){
                         new_witness_original.push(*witness);
                     }
                 }
 
-                new_witness_original.extend_from_slice(&vec![E::Fr::zero(); required_domain_size - new_witness_original.len()]);
-
-                let number_of_steps = new_witness_original.len();
+                new_witness_original.extend_from_slice(&vec![E::Fr::zero(); n - new_witness_original.len()]);
 
                 let mut numerator = Polynomial::from_values_unpadded(vec![E::Fr::one(); required_domain_size])?;
                 let mut denominator = Polynomial::from_values_unpadded(vec![E::Fr::one(); required_domain_size ])?;
 
-                // TODO: 
-                for i in 0..number_of_steps{
+                for i in 0..n{
                     let mut witness_part = gamma.clone();
                     witness_part.add_assign(&new_witness_original[i]);
 
@@ -1078,12 +1076,12 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                     let mut num = witness_part.clone();
                     num.mul_assign(&table_part);
                     
-                    numerator.as_mut()[i] = num;
+                    numerator.as_mut()[i+1] = num;
 
                     let mut s_part =gamma.clone();
                     s_part.add_assign(&s_original.as_ref()[i]);
 
-                    denominator.as_mut()[i] = s_part;
+                    denominator.as_mut()[i+1] = s_part;
                 }
                 
                 denominator.batch_inversion(&worker)?;
@@ -1092,9 +1090,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
                 let z = denominator.clone();
 
-                let expected = gamma_beta_one.pow([(number_of_steps) as u64]);
-                // assert_eq!(z.as_ref()[0], E::Fr::one()); // z(X)*L_1(x) = 1
-                // assert_eq!(z.as_ref()[number_of_steps], expected); // z(X*w)*L_{n-1}(x) = gamma*(beta+1)^n
+                let expected = gamma.pow([(n) as u64]);
+
+                assert_eq!(z.as_ref()[0], E::Fr::one()); // z(X)*L_1(x) = 1
+                assert_eq!(z.as_ref()[n], expected); // z(X*w)*L_{n-1}(x) = gamma^n
+
                 // println!("range z ");
                 // z.as_ref().iter().for_each(|e| println!("{}", e));
 
@@ -1122,29 +1122,30 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
             // calculate plookup quotient polynomnial
 
-            // lhs = Z(x*omega) * (\gamma + s(x))
-            // rhs = Z(x)* (\gamma + f(x)) * (\gamma + t(x))
+            // lhs = Z(x)* (\gamma + f(x)) * (\gamma + t(x))
+            // rhs = Z(x*omega) * (\gamma + s(x))
             // lhs - rhs = 0 mod Zh
             // t = (lhs - rhs)/Zh
-            let plookup_lhs = {
-                let mut lhs = s_poly.clone();
-                lhs.add_constant(&worker, &gamma);
-                lhs.mul_assign(&worker, &plookup_shifted_z);
+            let plookup_rhs = {
+                let mut rhs = s_poly.clone();
+                rhs.add_constant(&worker, &gamma);
+                rhs.mul_assign(&worker, &plookup_shifted_z);
 
-                lhs
+                rhs
             };
 
-            let  plookup_rhs = {        
-                let mut rhs = witness_poly.clone();
-                rhs.add_constant(&worker, &gamma);
+            let  plookup_lhs = {        
+                let mut lhs = witness_poly.clone();
+                lhs.add_constant(&worker, &gamma);
                 
                 let mut tmp = table_poly.clone();
                 tmp.add_constant(&worker, &gamma);
-                rhs.add_assign(&worker, &tmp);
-                
-                rhs.mul_assign(&worker, &plookup_z);
 
-                rhs
+                lhs.mul_assign(&worker, &tmp);
+                
+                lhs.mul_assign(&worker, &plookup_z);
+
+                lhs
             };
 
             assert_eq!(plookup_lhs.size(), new_domain_size);
