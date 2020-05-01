@@ -507,8 +507,6 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
     pub fn make_lookup_table_polynomials(&self) -> Result<Vec<Polynomial<E::Fr, Values>>, SynthesisError>{
         assert!(self.is_table_initialized);
 
-        let required_domain_size  = self.n + 1;
-
         let mut total_row_count = 0;
 
         let standard_lookup_tables = self.lookup_tables.iter().filter(|t| t.lookup_type() != TableType::Range);
@@ -518,10 +516,10 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
         }
 
         // prepend zeroes
-        let mut t1_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
-        let mut t2_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
-        let mut t3_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
-        let mut t4_values = vec![E::Fr::zero(); required_domain_size-total_row_count];
+        let mut t1_values = vec![E::Fr::zero(); self.n-total_row_count];
+        let mut t2_values = vec![E::Fr::zero(); self.n-total_row_count];
+        let mut t3_values = vec![E::Fr::zero(); self.n-total_row_count];
+        let mut t4_values = vec![E::Fr::zero(); self.n-total_row_count];
 
         for lookup_table in standard_lookup_tables{
             assert_ne!(lookup_table.lookup_type().to_string(), TableType::Range.to_string());
@@ -533,10 +531,10 @@ impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
             }
         }
 
-        let t1 = Polynomial::from_values(t1_values)?;
-        let t2 = Polynomial::from_values(t2_values)?;
-        let t3 = Polynomial::from_values(t3_values)?;
-        let t4 = Polynomial::from_values(t4_values)?;
+        let t1 = Polynomial::from_values_unpadded(t1_values)?;
+        let t2 = Polynomial::from_values_unpadded(t2_values)?;
+        let t3 = Polynomial::from_values_unpadded(t3_values)?;
+        let t4 = Polynomial::from_values_unpadded(t4_values)?;
 
         Ok(vec![t1, t2, t3, t4])
     }
