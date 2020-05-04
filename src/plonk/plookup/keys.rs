@@ -304,6 +304,7 @@ pub struct Proof<E: Engine, P: PlonkConstraintSystemParams<E>> {
     pub wire_commitments: Vec<E::G1Affine>,
     pub grand_product_commitment: E::G1Affine,
     pub plookup_grand_product_commitment: E::G1Affine,
+    pub plookup_range_grand_product_commitment: E::G1Affine,
     pub quotient_poly_commitments: Vec<E::G1Affine>,
 
     pub wire_values_at_z: Vec<E::Fr>,
@@ -330,6 +331,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> Proof<E, P> {
             wire_commitments: vec![],
             grand_product_commitment: E::G1Affine::zero(),
             plookup_grand_product_commitment: E::G1Affine::zero(),
+            plookup_range_grand_product_commitment: E::G1Affine::zero(),
             quotient_poly_commitments: vec![],
             wire_values_at_z: vec![],
             wire_values_at_z_omega: vec![],
@@ -471,6 +473,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> Proof<E, P> {
             wire_commitments: wire_commitments,
             grand_product_commitment: grand_product_commitment,
             plookup_grand_product_commitment: CurveAffine::zero(),
+            plookup_range_grand_product_commitment: CurveAffine::zero(),
             quotient_poly_commitments: quotient_poly_commitments,
             wire_values_at_z: wire_values_at_z,
             wire_values_at_z_omega: wire_values_at_z_omega,

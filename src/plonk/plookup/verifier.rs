@@ -68,9 +68,11 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     
     // commit plookup grand product
     commit_point_as_xy::<E, _>(&mut transcript, &proof.plookup_grand_product_commitment);
+    
+    // commit plookup range grand product
+    commit_point_as_xy::<E, _>(&mut transcript, &proof.plookup_range_grand_product_commitment);
 
     let alpha = transcript.get_challenge();
-    println!("v alpha: {}", alpha);
 
     // Commit parts of the quotient polynomial
     for w in proof.quotient_poly_commitments.iter() {
@@ -155,6 +157,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         rhs.sub_assign(&l_0_at_z);
 
         if lhs != rhs {
+            println!("verification of quotient polynomial has failed");
             return Ok(false);
         }
     }
