@@ -686,11 +686,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         )?;
 
         fn make_plookup_variables<E: Engine>(
-            witness_assignments: Vec<Polynomial<E::Fr, Values>>,
-            table_polynomials: Vec<&Box<dyn LookupTable<E::Fr>>>,
-            lookup_gate_selector: Polynomial<E::Fr, Values>,
-            table_index_selector: Polynomial<E::Fr, Values>,
-            setup_polynomials: Vec<Polynomial<E::Fr, Values>>,
+            witness_assignments: &[Polynomial<E::Fr, Values>],
+            table_polynomials: &[&Box<dyn LookupTable<E::Fr>>],
+            lookup_gate_selector: &Polynomial<E::Fr, Values>,
+            table_index_selector: &Polynomial<E::Fr, Values>,
+            setup_polynomials: &[Polynomial<E::Fr, Values>],
             challenge: E::Fr, 
             num_lookups: usize,
             worker: &Worker,
@@ -780,11 +780,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let lookup_table_values = setup.lookup_table_polynomials.clone();
 
             let [s_original, witness_original, table_original] = make_plookup_variables::<E>(
-                assignment_polynomials.clone(),
-                standard_lookup_tables.clone(),
-                lookup_gate_selector.clone(),
-                unpadded_table_selector.clone(),
-                lookup_table_values,
+                &assignment_polynomials,
+                &standard_lookup_tables,
+                &lookup_gate_selector,
+                &unpadded_table_selector,
+                &lookup_table_values,
                 plookup_challenge,
                 num_standard_lookups,
                 worker,
@@ -862,7 +862,16 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             shifted_z_in_monomial.distribute_powers(&worker, z_in_monomial.omega);
             
             let mut quotient_protos = vec![];
-            for p in [witness_in_monomial, table_original_in_monomial, shifted_table_original_in_monomial, z_in_monomial, s_in_monomial, shifted_s_in_monomial, shifted_z_in_monomial].iter(){
+            for p in [
+                witness_in_monomial, 
+                table_original_in_monomial, 
+                shifted_table_original_in_monomial, 
+                z_in_monomial, 
+                s_in_monomial, 
+                shifted_s_in_monomial, 
+                shifted_z_in_monomial
+            ].iter()
+            {
                 let poly = p.clone();
                 quotient_protos.push(poly.coset_lde(&worker, LDE_FACTOR)?);
             }
@@ -916,11 +925,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let range_lookup_table_values = setup.range_table_polynomials.clone();
             
             let [s_original, witness_original, table_original] = make_plookup_variables::<E>(
-                assignment_polynomials,
-                range_lookup_tables,
-                range_lookup_gate_selector.clone(),
-                unpadded_table_selector,
-                range_lookup_table_values,
+                &assignment_polynomials,
+                &range_lookup_tables,
+                &range_lookup_gate_selector,
+                &unpadded_table_selector,
+                &range_lookup_table_values,
                 plookup_challenge,
                 num_range_lookups,
                 worker,
@@ -984,7 +993,14 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             shifted_z_in_monomial.distribute_powers(&worker, z_in_monomial.omega);
 
             let mut quotient_protos = vec![];
-            for p in [witness_in_monomial, table_in_monomial, z_in_monomial, s_in_monomial, shifted_z_in_monomial].iter(){
+            for p in [
+                witness_in_monomial, 
+                table_in_monomial, 
+                z_in_monomial, 
+                s_in_monomial, 
+                shifted_z_in_monomial
+            ].iter()
+            {
                 let poly = p.clone();
                 quotient_protos.push(poly.coset_lde(&worker, LDE_FACTOR)?);
             }
