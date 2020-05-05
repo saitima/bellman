@@ -801,31 +801,60 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let shifted_table_original = shifted_table_original_in_monomial.clone().fft(&worker);
 
             let plookup_z = {
-                let mut numerator = Polynomial::from_values(vec![E::Fr::one(); required_domain_size])?;
-                let mut denominator = Polynomial::from_values(vec![E::Fr::one(); required_domain_size])?;
+                let mut numerator_values = vec![E::Fr::one(); required_domain_size];
+                let mut denominator_values = vec![E::Fr::one(); required_domain_size];
 
-                for i in 0..n{
-                    let mut witness_part = witness_original.as_ref()[i].clone();
-                    witness_part.mul_assign(&lookup_gate_selector.as_ref()[i]);
-                    witness_part.add_assign(&gamma);
+                let numerator_shifted = &mut numerator_values[1..];
+                let denominator_shifted = &mut denominator_values[1..];
 
-                    let mut table_part = shifted_table_original.as_ref()[i];
-                    table_part.mul_assign(&beta);                
-                    table_part.add_assign(&table_original.as_ref()[i]);
-                    table_part.add_assign(&gamma_beta_one);
+                worker.scope(required_domain_size, |scope, chunk|{
+                    for (((((((denom,num),witness),lookup),shifted_table), table), shifted_s), s) in denominator_shifted.as_mut().chunks_mut(chunk)
+                            .zip(numerator_shifted.as_mut().chunks_mut(chunk))
+                            .zip(witness_original.as_ref().chunks(chunk))
+                            .zip(lookup_gate_selector.as_ref().chunks(chunk))
+                            .zip(shifted_table_original.as_ref().chunks(chunk))
+                            .zip(table_original.as_ref().chunks(chunk))
+                            .zip(shifted_s_original.as_ref().chunks(chunk))
+                            .zip(s_original.as_ref().chunks(chunk))
+                            {
+                                scope.spawn(move |_|{
+                                    for  (((((((denom, num), witness),lookup),shifted_table), table), shifted_s), s) in denom.iter_mut()
+                                        .zip(num.iter_mut())
+                                        .zip(witness.iter())
+                                        .zip(lookup.iter())
+                                        .zip(shifted_table.iter())
+                                        .zip(table.iter())
+                                        .zip(shifted_s.iter())
+                                        .zip(s.iter())
+                                        {
+                                            let mut witness_part = witness.clone();
+                                            witness_part.mul_assign(lookup);
+                                            witness_part.add_assign(&gamma);
+            
+                                            let mut table_part = shifted_table.clone();
+                                            table_part.mul_assign(&beta);                
+                                            table_part.add_assign(&table);
+                                            table_part.add_assign(&gamma_beta_one);
+            
+                                            let mut numerator = beta_one.clone();
+                                            numerator.mul_assign(&witness_part);
+                                            numerator.mul_assign(&table_part);
+                                            
+                                            *num = numerator;
+            
+                                            let mut denominator = shifted_s.clone();
+                                            denominator.mul_assign(&beta);
+                                            denominator.add_assign(&s);
+                                            denominator.add_assign(&gamma_beta_one);
 
-                    let mut num = beta_one.clone();
-                    num.mul_assign(&witness_part);
-                    num.mul_assign(&table_part);
-                    
-                    numerator.as_mut()[i+1] = num;
+                                            *denom = denominator;
+                                        }
+                                });
+                            }
+                });
 
-                    let mut s_part = shifted_s_original.as_ref()[i].clone();
-                    s_part.mul_assign(&beta);
-                    s_part.add_assign(&s_original.as_ref()[i]);
-                    s_part.add_assign(&gamma_beta_one);
-                    denominator.as_mut()[i+1] = s_part;
-                }
+                let numerator = Polynomial::from_values(numerator_values)?;
+                let mut denominator = Polynomial::from_values(denominator_values)?;
                 
                 denominator.batch_inversion(&worker)?;
                 denominator.mul_assign(&worker, &numerator);
@@ -936,30 +965,48 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             )?;
 
             let plookup_z = {
-                // all s_original, witness_original and table_priginal are same size
-                // assert_eq!(witness_original.as_ref().len(), unpadded_range_selector.as_ref().len());                
+                let mut numerator_values = vec![E::Fr::one(); required_domain_size];
+                let mut denominator_values = vec![E::Fr::one(); required_domain_size];
 
-                let mut numerator = Polynomial::from_values(vec![E::Fr::one(); required_domain_size])?;
-                let mut denominator = Polynomial::from_values(vec![E::Fr::one(); required_domain_size ])?;
+                let numerator_shifted = &mut numerator_values[1..];
+                let denominator_shifted = &mut denominator_values[1..];
 
-                for i in 0..n{
-                    let mut witness_part = witness_original.as_ref()[i].clone();
-                    witness_part.mul_assign(&range_lookup_gate_selector.as_ref()[i]);
-                    witness_part.add_assign(&gamma);
+                worker.scope(required_domain_size, |scope, chunk|{
+                    for (((((denom,num),witness),lookup), table), s) in denominator_shifted.as_mut().chunks_mut(chunk)
+                            .zip(numerator_shifted.as_mut().chunks_mut(chunk))
+                            .zip(witness_original.as_ref().chunks(chunk))
+                            .zip(range_lookup_gate_selector.as_ref().chunks(chunk))
+                            .zip(table_original.as_ref().chunks(chunk))
+                            .zip(s_original.as_ref().chunks(chunk))
+                            {
+                                scope.spawn(move |_|{
+                                    for  (((((denom, num), witness),lookup), table), s) in denom.iter_mut()
+                                        .zip(num.iter_mut())
+                                        .zip(witness.iter())
+                                        .zip(lookup.iter())
+                                        .zip(table.iter())
+                                        .zip(s.iter())
+                                        {
+                                            let mut numerator = witness.clone();
+                                            numerator.mul_assign(lookup);
+                                            numerator.add_assign(&gamma);
+                                            let mut tmp =  table.clone();
+                                            tmp.add_assign(&gamma);
+                                            numerator.mul_assign(&tmp);
+        
+                                            *num = numerator;
+            
+                                            let mut denominator = s.clone();
+                                            denominator.add_assign(&gamma);
 
-                    let mut table_part = gamma.clone();
-                    table_part.add_assign(&table_original.as_ref()[i]);
+                                            *denom = denominator;
+                                        }
+                                });
+                            }
+                });
 
-                    let mut num = witness_part.clone();
-                    num.mul_assign(&table_part);
-                    
-                    numerator.as_mut()[i+1] = num;
-
-                    let mut s_part =gamma.clone();
-                    s_part.add_assign(&s_original.as_ref()[i]);
-
-                    denominator.as_mut()[i+1] = s_part;
-                }
+                let numerator = Polynomial::from_values(numerator_values)?;
+                let mut denominator = Polynomial::from_values(denominator_values)?;
                 
                 denominator.batch_inversion(&worker)?;
                 denominator.mul_assign(&worker, &numerator);
