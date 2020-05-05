@@ -710,6 +710,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 // sort([gates of table_1] + table_1) + sort([gates of table_2] + table_2) + .. sort([gates of table_n] + table_n)
                 let mut s_vec: Vec<MultiSet<E>> = vec![MultiSet::new(); n - total_row_size];
 
+                // TODO: computational bottleneck happens here
+                // consider to store gates inside table
                 for lookup_table in table_polynomials {
                     let mut s_intermediate = vec![];
                     for ((((l,r), o), lookup), table_index) in witness_assignments[0].as_ref().iter()
@@ -721,7 +723,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                             s_intermediate.push(MultiSet::from_vec([*l, *r, *o, *table_index]));
                         }
                     }
-                    
+
                     for (col1, col2, col3) in lookup_table.iter(){
                         s_intermediate.push( MultiSet::from_vec([*col1, *col2, *col3, lookup_table.lookup_table_type_as_fe()]));
                     }
@@ -775,7 +777,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         }
 
         // standard lookup
-        {   
+        let lookup_std_quotient_in_monomial = {   
             assert!(num_standard_lookups > 0);
             let lookup_table_values = setup.lookup_table_polynomials.clone();
 
@@ -943,13 +945,14 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
             let plookup_t_poly = plookup_t.icoset_fft(&worker);
             // TODO: assert degree
-            println!("std plookup");
-            plookup_t_poly.as_ref().iter().enumerate().for_each(|(i, e)| println!("{} {}", i, e));
-            
-        }
+            // println!("std plookup");
+            // plookup_t_poly.as_ref().iter().enumerate().for_each(|(i, e)| println!("{} {}", i, e));
+
+            plookup_t_poly
+        };
 
         // range lookup
-        {  
+        let lookup_range_quotient_in_monomial = {  
             assert!(num_range_lookups > 0);
             let range_lookup_table_values = setup.range_table_polynomials.clone();
             
@@ -1087,15 +1090,15 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
             let mut plookup_t = plookup_lhs.clone();
             plookup_t.sub_assign(&worker, &plookup_rhs);
-
             plookup_t.mul_assign(&worker, &vanishing_poly_for_lookup_quotient);
 
             let plookup_range_t_poly = plookup_t.icoset_fft(&worker);
             // TODO: assert degree
             println!("range plookup");
-            plookup_range_t_poly.as_ref().iter().enumerate().for_each(|(i, e)| println!("{} {}", i, e));
+
+            plookup_range_t_poly
             
-        }
+        };
 
         // END PLOOKUP
 
@@ -1267,13 +1270,44 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             drop(z_minus_one_by_l_0);
         }
 
+
+
         drop(tmp);
 
         t_1.mul_assign(&worker, &setup_precomputations.inverse_divisor_on_coset_of_size_4n_bitreversed);
 
         t_1.bitreverse_enumeration(&worker);
 
-        let t_poly_in_monomial_form = t_1.icoset_fft_for_generator(&worker, &E::Fr::multiplicative_generator());
+        let mut t_poly_in_monomial_form = t_1.icoset_fft_for_generator(&worker, &E::Fr::multiplicative_generator());
+
+
+        {
+            // add plookup quotients 
+
+            // TODO: this is a quick solution but needs simplification
+
+            // std
+            quotient_linearization_challenge.mul_assign(&alpha);
+
+            let mut lookup_std_quotient = lookup_std_quotient_in_monomial.clone().fft(&worker);
+
+            lookup_std_quotient.scale(&worker, quotient_linearization_challenge);
+
+            let lookup_std_quotient_in_monomial_with_challenge = lookup_std_quotient.ifft(&worker);
+            
+            t_poly_in_monomial_form.add_assign(&worker, &lookup_std_quotient_in_monomial_with_challenge);
+
+            // range
+            quotient_linearization_challenge.mul_assign(&alpha);
+
+            let mut lookup_range_quotient = lookup_range_quotient_in_monomial.clone().fft(&worker);
+            
+            lookup_range_quotient.scale(&worker, quotient_linearization_challenge);
+
+            let lookup_range_quotient_in_monomial_with_challenge = lookup_range_quotient.ifft(&worker);
+
+            t_poly_in_monomial_form.add_assign(&worker, &lookup_range_quotient_in_monomial_with_challenge);
+        }
 
         let mut t_poly_parts = t_poly_in_monomial_form.break_into_multiples(required_domain_size)?;
 
@@ -1483,7 +1517,26 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
             rhs.sub_assign(&l_0_at_z);
 
+            // evaluate plookup quotients at z
+            quotient_linearization_challenge.mul_assign(&alpha);
+            let mut lookup_std_quotient_at_z  = lookup_std_quotient_in_monomial.evaluate_at(&worker, z);
+            lookup_std_quotient_at_z.mul_assign(&quotient_linearization_challenge);
+            
+            // TODO: it's already divided by vanishing, multiply by it for now
+            lookup_std_quotient_at_z.mul_assign(&vanishing_at_z); 
+            
+            quotient_linearization_challenge.mul_assign(&alpha);
+            let mut lookup_range_quotient_at_z  = lookup_range_quotient_in_monomial.evaluate_at(&worker, z);
+            lookup_range_quotient_at_z.mul_assign(&quotient_linearization_challenge);
+            
+            // TODO: it's already divided by vanishing, multiply by it for now
+            lookup_range_quotient_at_z.mul_assign(&vanishing_at_z); 
+
+            rhs.add_assign(&lookup_std_quotient_at_z);
+            rhs.add_assign(&lookup_range_quotient_at_z);
+
             if lhs != rhs {
+                println!("sanity check failed");
                 return Err(SynthesisError::Unsatisfiable);
             }
         }
