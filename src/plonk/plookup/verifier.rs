@@ -43,6 +43,8 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         return Err(SynthesisError::MalformedVerifyingKey);
     }
 
+
+
     let domain = Domain::<E::Fr>::new_for_size(required_domain_size as u64)?;
 
     let selector_q_const_index = P::STATE_WIDTH + 1;
@@ -65,14 +67,16 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
     // commit grand product
     commit_point_as_xy::<E, _>(&mut transcript, &proof.grand_product_commitment);
+
     
     // commit plookup grand product
-    commit_point_as_xy::<E, _>(&mut transcript, &proof.plookup_grand_product_commitment);
+    // commit_point_as_xy::<E, _>(&mut transcript, &proof.plookup_proof.std_grand_product_commitment);
     
     // commit plookup range grand product
-    commit_point_as_xy::<E, _>(&mut transcript, &proof.plookup_range_grand_product_commitment);
-
+    commit_point_as_xy::<E, _>(&mut transcript, &proof.plookup_proof.range_grand_product_commitment);
+    
     let alpha = transcript.get_challenge();
+    
 
     // Commit parts of the quotient polynomial
     for w in proof.quotient_poly_commitments.iter() {
@@ -82,6 +86,10 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     let z = transcript.get_challenge();
     let mut z_by_omega = z;
     z_by_omega.mul_assign(&domain.generator);
+
+    println!("[v] permuatation challenges gamma beta {} {}", gamma, beta);
+    println!("[v] quotient challenge alpha {}", alpha);
+    println!("[v] evaluation challenge z zw {} {}", z, z_by_omega);
 
     // commit every claimed value
 
@@ -97,6 +105,19 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         transcript.commit_field_element(el);
     }
 
+    // commit plookup evaluations
+
+    let plookup_proof = &proof.plookup_proof;
+    transcript.commit_field_element(&plookup_proof.range_lookup_selector_at_z);
+    transcript.commit_field_element(&plookup_proof.range_lookup_table_id_selector_at_z);
+    transcript.commit_field_element(&plookup_proof.range_grand_product_at_z);
+    transcript.commit_field_element(&plookup_proof.range_grand_product_at_z_omega);
+    transcript.commit_field_element(&plookup_proof.range_s_at_z);
+
+    for el in plookup_proof.range_table_columns_at_z.iter(){
+        transcript.commit_field_element(el);
+    }
+
     transcript.commit_field_element(&proof.quotient_polynomial_at_z);
 
     transcript.commit_field_element(&proof.linearization_polynomial_at_z);
@@ -106,8 +127,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
     {
         let mut lhs = proof.quotient_polynomial_at_z;
-        let vanishing_at_z = evaluate_vanishing_for_size(&z, required_domain_size as u64);
-        lhs.mul_assign(&vanishing_at_z);
+
 
         let mut quotient_linearization_challenge = E::Fr::one();
 
@@ -155,6 +175,73 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         l_0_at_z.mul_assign(&quotient_linearization_challenge);
 
         rhs.sub_assign(&l_0_at_z);
+
+        let inverse_vanishing_at_z = evaluate_vanishing_for_size(&z, required_domain_size as u64).inverse().unwrap();
+        rhs.mul_assign(&inverse_vanishing_at_z);
+
+        // plookup quotients
+        // range
+        let plookup_challenge = E::Fr::from_str("42").unwrap();
+        
+        let mut plookup_range_contribution = {
+            // f(z) = (a(z) + b(z)*challenge + c(z)*challenge^2 + table_id(z)*challenge^3)*q_lookup(z)
+            let mut witness_part = E::Fr::zero();
+            let mut scalar = E::Fr::one();
+            let wire_values_at_z = &proof.wire_values_at_z[0..3];
+            for p in wire_values_at_z.iter(){
+                let mut tmp = p.clone();
+                tmp.mul_assign(&scalar);
+                witness_part.add_assign(&tmp);
+                scalar.mul_assign(&plookup_challenge);
+            }
+
+            let mut table_id_by_challenge = plookup_proof.range_lookup_table_id_selector_at_z.clone();
+            table_id_by_challenge.mul_assign(&scalar);
+            witness_part.add_assign(&table_id_by_challenge);
+            witness_part.mul_assign(&plookup_proof.range_lookup_selector_at_z);
+
+            // println!("[v] witness: {}", witness_part);
+            witness_part.add_assign(&gamma);
+            
+
+            // t(z) = (t1(z) + t2(z)*challenge + t3(z)*challenge^2 + table_id(z)*challenge^3)
+            let mut table_part = E::Fr::zero();
+            let mut scalar = E::Fr::one();
+            for p in plookup_proof.range_table_columns_at_z.iter() {
+                let mut tmp = p.clone();
+                tmp.mul_assign(&scalar);
+                table_part.add_assign(&tmp);
+                scalar.mul_assign(&plookup_challenge);
+            }
+            // println!("[v] table: {}", table_part);
+            table_part.add_assign(&gamma);
+
+            // Z(z) *(\gamma + f(z)) * (\gamma + t(z)) - Z(z*w) * (\gamma + s(z)) = t(z) * Z_h(z)
+
+            let mut rhs = plookup_proof.range_grand_product_at_z.clone();
+            rhs.mul_assign(&witness_part);
+            rhs.mul_assign(&table_part);
+
+            let mut tmp = plookup_proof.range_s_at_z.clone();
+            tmp.add_assign(&gamma);
+            tmp.mul_assign(&plookup_proof.range_grand_product_at_z_omega);
+
+            rhs.sub_assign(&tmp);
+
+            let lookup_vanishing_at_z = evaluate_inverse_vanishing_poly_with_last_point_cut(required_domain_size, z);
+
+            rhs.mul_assign(&lookup_vanishing_at_z);
+
+            rhs
+        };
+
+        quotient_linearization_challenge.mul_assign(&alpha);
+
+        plookup_range_contribution.mul_assign(&quotient_linearization_challenge);
+
+        rhs.add_assign(&plookup_range_contribution);
+
+        // commitments to lookup selectors: q_lookup, q_range, q_table_index
 
         if lhs != rhs {
             println!("verification of quotient polynomial has failed");

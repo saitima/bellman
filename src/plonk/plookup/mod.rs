@@ -8,7 +8,6 @@ pub mod verifier;
 pub mod one_shot_test_assembly;
 pub mod fma_adaptor;
 pub mod lookup_table;
-pub mod trait_objects;
 mod playground;
 mod utils;
 

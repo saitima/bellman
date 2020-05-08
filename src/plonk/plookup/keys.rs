@@ -297,14 +297,51 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomialsPrecomputatio
 }
 
 #[derive(Clone, Debug)]
+pub struct PlookupProof<E: Engine>{
+    // we do not need to store commitments to lookup selectors in here
+    // they have already stored in VerificationKey
+    // 
+    // std_grand_product_commitment:  E::Fr,
+    // std_grand_product_omega_commitment:  E::Fr,
+    // std_s_commitment: E::Fr,
+    // std_table_commitment: E::Fr,
+    pub range_grand_product_commitment:  E::G1Affine,
+    pub range_s_commitment: E::G1Affine,
+
+    pub range_quotient_at_z: E::Fr,
+    pub range_lookup_selector_at_z: E::Fr,
+    pub range_lookup_table_id_selector_at_z: E::Fr,
+    pub range_grand_product_at_z: E::Fr,
+    pub range_grand_product_at_z_omega: E::Fr,
+    pub range_s_at_z: E::Fr,
+    pub range_table_columns_at_z: [E::Fr; 4],
+}
+
+impl<E: Engine> PlookupProof<E>{
+    fn empty() -> Self{
+        use crate::pairing::CurveAffine;
+        Self{
+            range_grand_product_commitment: E::G1Affine::zero(),
+            range_s_commitment: E::G1Affine::zero(),
+            
+            range_quotient_at_z: E::Fr::zero(),
+            range_lookup_selector_at_z: E::Fr::zero(),
+            range_lookup_table_id_selector_at_z: E::Fr::zero(),
+            range_grand_product_at_z: E::Fr::zero(),
+            range_grand_product_at_z_omega: E::Fr::zero(),
+            range_s_at_z: E::Fr::zero(),
+            range_table_columns_at_z: [E::Fr::zero(); 4],
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Proof<E: Engine, P: PlonkConstraintSystemParams<E>> {
     pub num_inputs: usize,
     pub n: usize,
     pub input_values: Vec<E::Fr>,
     pub wire_commitments: Vec<E::G1Affine>,
     pub grand_product_commitment: E::G1Affine,
-    pub plookup_grand_product_commitment: E::G1Affine,
-    pub plookup_range_grand_product_commitment: E::G1Affine,
     pub quotient_poly_commitments: Vec<E::G1Affine>,
 
     pub wire_values_at_z: Vec<E::Fr>,
@@ -316,6 +353,8 @@ pub struct Proof<E: Engine, P: PlonkConstraintSystemParams<E>> {
 
     pub opening_at_z_proof: E::G1Affine,
     pub opening_at_z_omega_proof: E::G1Affine,
+
+    pub plookup_proof: PlookupProof<E>,
 
     pub(crate) _marker: std::marker::PhantomData<P>,
 }
@@ -330,8 +369,6 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> Proof<E, P> {
             input_values: vec![],
             wire_commitments: vec![],
             grand_product_commitment: E::G1Affine::zero(),
-            plookup_grand_product_commitment: E::G1Affine::zero(),
-            plookup_range_grand_product_commitment: E::G1Affine::zero(),
             quotient_poly_commitments: vec![],
             wire_values_at_z: vec![],
             wire_values_at_z_omega: vec![],
@@ -339,6 +376,8 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> Proof<E, P> {
             quotient_polynomial_at_z: E::Fr::zero(),
             linearization_polynomial_at_z: E::Fr::zero(),
             permutation_polynomials_at_z: vec![],
+
+            plookup_proof: PlookupProof::empty(),
 
             opening_at_z_proof: E::G1Affine::zero(),
             opening_at_z_omega_proof: E::G1Affine::zero(),
@@ -472,8 +511,6 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> Proof<E, P> {
             input_values: inputs,
             wire_commitments: wire_commitments,
             grand_product_commitment: grand_product_commitment,
-            plookup_grand_product_commitment: CurveAffine::zero(),
-            plookup_range_grand_product_commitment: CurveAffine::zero(),
             quotient_poly_commitments: quotient_poly_commitments,
             wire_values_at_z: wire_values_at_z,
             wire_values_at_z_omega: wire_values_at_z_omega,
@@ -481,6 +518,8 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> Proof<E, P> {
             quotient_polynomial_at_z,
             linearization_polynomial_at_z,
             permutation_polynomials_at_z: permutation_polynomials_at_z,
+
+            plookup_proof: PlookupProof::empty(), // TODO: 
 
             opening_at_z_proof: opening_at_z_proof,
             opening_at_z_omega_proof: opening_at_z_omega_proof,
