@@ -298,17 +298,22 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomialsPrecomputatio
 
 #[derive(Clone, Debug)]
 pub struct PlookupProof<E: Engine>{
-    // we do not need to store commitments to lookup selectors in here
-    // they have already stored in VerificationKey
-    // 
-    // std_grand_product_commitment:  E::Fr,
-    // std_grand_product_omega_commitment:  E::Fr,
-    // std_s_commitment: E::Fr,
-    // std_table_commitment: E::Fr,
+
+    pub std_grand_product_commitment:  E::G1Affine,
+    pub std_s_commitment: E::G1Affine,
+
+    pub std_lookup_selector_at_z: E::Fr,
+    pub std_lookup_table_id_selector_at_z: E::Fr,
+    pub std_grand_product_at_z: E::Fr,
+    pub std_grand_product_at_z_omega: E::Fr,
+    pub std_s_at_z: E::Fr,
+    pub std_shifted_s_at_z: E::Fr,
+    pub std_table_columns_at_z: [E::Fr; 4],
+    pub std_shifted_table_columns_at_z: [E::Fr; 4],
+
     pub range_grand_product_commitment:  E::G1Affine,
     pub range_s_commitment: E::G1Affine,
 
-    pub range_quotient_at_z: E::Fr,
     pub range_lookup_selector_at_z: E::Fr,
     pub range_lookup_table_id_selector_at_z: E::Fr,
     pub range_grand_product_at_z: E::Fr,
@@ -321,10 +326,21 @@ impl<E: Engine> PlookupProof<E>{
     fn empty() -> Self{
         use crate::pairing::CurveAffine;
         Self{
+            std_grand_product_commitment: E::G1Affine::zero(),
+            std_s_commitment: E::G1Affine::zero(),
+
+            std_lookup_selector_at_z: E::Fr::zero(),
+            std_lookup_table_id_selector_at_z: E::Fr::zero(),
+            std_grand_product_at_z: E::Fr::zero(),
+            std_grand_product_at_z_omega: E::Fr::zero(),
+            std_s_at_z: E::Fr::zero(),
+            std_shifted_s_at_z: E::Fr::zero(),
+            std_table_columns_at_z: [E::Fr::zero(); 4],
+            std_shifted_table_columns_at_z: [E::Fr::zero(); 4],
+
             range_grand_product_commitment: E::G1Affine::zero(),
             range_s_commitment: E::G1Affine::zero(),
             
-            range_quotient_at_z: E::Fr::zero(),
             range_lookup_selector_at_z: E::Fr::zero(),
             range_lookup_table_id_selector_at_z: E::Fr::zero(),
             range_grand_product_at_z: E::Fr::zero(),
