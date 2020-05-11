@@ -284,7 +284,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
             // f(z) = (a(z) + b(z)*challenge + c(z)*challenge^2 + table_id(z)*challenge^3)*q_lookup(z)
             let mut witness_part = E::Fr::zero();
             let mut scalar = E::Fr::one();
-            let wire_values_at_z = &proof.wire_values_at_z[0..3];
+            let wire_values_at_z = &proof.wire_values_at_z[0..1];
             for p in wire_values_at_z.iter(){
                 let mut tmp = p.clone();
                 tmp.mul_assign(&scalar);
@@ -292,9 +292,9 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
                 scalar.mul_assign(&plookup_challenge);
             }
 
-            let mut table_id_by_challenge = plookup_proof.range_lookup_table_id_selector_at_z.clone();
-            table_id_by_challenge.mul_assign(&scalar);
-            witness_part.add_assign(&table_id_by_challenge);
+            // let mut table_id_by_challenge = plookup_proof.range_lookup_table_id_selector_at_z.clone();
+            // table_id_by_challenge.mul_assign(&scalar);
+            // witness_part.add_assign(&table_id_by_challenge);
             witness_part.mul_assign(&plookup_proof.range_lookup_selector_at_z);
 
             // println!("[v] witness: {}", witness_part);
@@ -304,7 +304,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
             // t(z) = (t1(z) + t2(z)*challenge + t3(z)*challenge^2 + table_id(z)*challenge^3)
             let mut table_part = E::Fr::zero();
             let mut scalar = E::Fr::one();
-            for p in plookup_proof.range_table_columns_at_z.iter() {
+            for p in plookup_proof.range_table_columns_at_z[..1].iter() {
                 let mut tmp = p.clone();
                 tmp.mul_assign(&scalar);
                 table_part.add_assign(&tmp);

@@ -1,4 +1,5 @@
 use crate::pairing::ff::PrimeField;
+use super::lookup_table::TableType;
 
 use std::cmp::Ordering;
 
@@ -13,11 +14,19 @@ impl<F: PrimeField> MultiSet<F>{
         Self(vec)
     }
 
-    pub fn scale_and_sum(&self , s: F) -> F{
+    pub fn scale_and_sum(&self , s: F, is_range_lookup: bool) -> F{
         let mut scalar = F::one();
         let mut sum = F::zero();
 
-        self.0.iter().for_each(|e| {
+        let mut values = vec![];
+
+        if is_range_lookup{
+            values.push(self.0[0])
+        }else{
+            values.extend_from_slice(&self.0)
+        }
+
+        values.iter().for_each(|e| {
             let mut tmp = e.clone();
             tmp.mul_assign(&scalar);
             sum.add_assign(&tmp);

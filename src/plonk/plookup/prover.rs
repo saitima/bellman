@@ -667,6 +667,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             challenge: E::Fr, 
             num_lookups: usize,
             worker: &Worker,
+            is_range_lookup: bool,
         ) -> Result<[Polynomial<E::Fr, Values>; 3], SynthesisError>
         {
             let n = witness_assignments[0].as_ref().len();
@@ -699,7 +700,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                     s_vec.extend_from_slice(&s_intermediate[..]);
                 }                
 
-                let s_values: Vec<E::Fr> = s_vec.iter().map(|m| m.scale_and_sum(challenge)).collect();
+                let s_values: Vec<E::Fr> = s_vec.iter().map(|m| m.scale_and_sum(challenge, is_range_lookup)).collect();
 
                 let s = Polynomial::from_values_unpadded(s_values)?;
 
@@ -711,15 +712,20 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 let mut witness_assignments = witness_assignments[..3].iter().cloned();
                 let mut witness_original = witness_assignments.next().unwrap();
 
-                let mut scalar = challenge.clone();
-                for p in witness_assignments{
-                    witness_original.add_assign_scaled(&worker, &p, &scalar);
-                    scalar.mul_assign(&challenge);
+                if is_range_lookup{
+                    witness_original
+                }else{
+                    let mut scalar = challenge.clone();
+                    for p in witness_assignments{
+                        witness_original.add_assign_scaled(&worker, &p, &scalar);
+                        scalar.mul_assign(&challenge);
+                    }
+    
+                    witness_original.add_assign_scaled(&worker, &table_index_selector, &scalar);
+    
+                    witness_original    
                 }
 
-                witness_original.add_assign_scaled(&worker, &table_index_selector, &scalar);
-
-                witness_original                
             };
 
             let table = {
@@ -730,13 +736,17 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
                 let mut table_values = lookup_table_polynomials.next().unwrap();
 
-                let mut scalar = challenge.clone();
-                for p in lookup_table_polynomials{                    
-                    table_values.add_assign_scaled(&worker, &p, &scalar);
-                    scalar.mul_assign(&challenge);
+                if is_range_lookup{
+                    table_values
+                }else{
+                    let mut scalar = challenge.clone();
+                    for p in lookup_table_polynomials{                    
+                        table_values.add_assign_scaled(&worker, &p, &scalar);
+                        scalar.mul_assign(&challenge);
+                    }
+    
+                    table_values
                 }
-
-                table_values
             };     
 
             Ok([s, witness, table])
@@ -760,6 +770,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 plookup_challenge,
                 num_standard_lookups,
                 worker,
+                false,
             )?;
 
             let s_in_monomial = s_original.clone_padded_to_domain()?.ifft(&worker);
@@ -953,6 +964,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 plookup_challenge,
                 num_range_lookups,
                 worker,
+                true,
             )?;
 
             let plookup_z = {
@@ -1667,7 +1679,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 // f(z) = (a(z) + b(z)*challenge + c(z)*challenge^2 + table_id(z)*challenge^3)*q_lookup(z)
                 let mut witness_part = E::Fr::zero();
                 let mut scalar = E::Fr::one();
-                let wire_values_at_z = &proof.wire_values_at_z[0..3];
+                let wire_values_at_z = &proof.wire_values_at_z[0..1];
                 for p in wire_values_at_z.iter(){
                     let mut tmp = p.clone();
                     tmp.mul_assign(&scalar);
@@ -1677,7 +1689,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
                 let mut table_id_by_challenge = plookup_proof.range_lookup_table_id_selector_at_z.clone();
                 table_id_by_challenge.mul_assign(&scalar);
-                witness_part.add_assign(&table_id_by_challenge);
+                // witness_part.add_assign(&table_id_by_challenge);
                 witness_part.mul_assign(&plookup_proof.range_lookup_selector_at_z);
 
                 let expected_witness = lookup_range_witness_in_monomial.evaluate_at(&worker, z);
@@ -1689,7 +1701,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 // t(z) = (t1(z) + t2(z)*challenge + t3(z)*challenge^2 + table_id(z)*challenge^3)
                 let mut table_part = E::Fr::zero();
                 let mut scalar = E::Fr::one();
-                for p in plookup_proof.range_table_columns_at_z.iter() {
+                for p in plookup_proof.range_table_columns_at_z[..1].iter() {
                     let mut tmp = p.clone();
                     tmp.mul_assign(&scalar);
                     table_part.add_assign(&tmp);
