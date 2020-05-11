@@ -1,6 +1,7 @@
 use crate::pairing::Engine;
 use crate::pairing::ff::PrimeField;
 use std::fmt;
+use super::multiset::MultiSet;
 
 #[derive(Clone, Eq)]
 pub enum TableType{
@@ -41,12 +42,14 @@ pub trait LookupTable<F: PrimeField>{
     fn query_generic(&self, elems: Vec<F>) -> Option<Vec<F>>;
     fn size(&self) -> usize;
     fn iter(&self) -> std::slice::Iter<(F, F, F)>;
-
+    fn add_gate(&mut self, gate: MultiSet<F>);
+    fn gates(&self) -> Vec<MultiSet<F>>;
 }
 
 #[derive(Clone)]
 pub struct XorTable<F: PrimeField>{
-    rows: Vec<(F, F, F)>
+    rows: Vec<(F, F, F)>,
+    gates: Vec<MultiSet<F>>,
 }
 
 impl<F: PrimeField> XorTable<F>{
@@ -63,7 +66,8 @@ impl<F: PrimeField> XorTable<F>{
         }
     
         let table  = XorTable{
-            rows
+            rows,
+            gates: vec![],
         };
 
         table
@@ -103,11 +107,20 @@ impl<F: PrimeField> LookupTable<F> for XorTable<F>{
     fn iter(&self) -> std::slice::Iter<(F, F, F)> {
         self.rows.iter()
     }
+    fn add_gate(&mut self, gate: MultiSet<F>) {
+        self.gates.push(gate);
+    }
+    
+    fn gates(&self) -> Vec<MultiSet<F>> {
+        self.gates.clone()
+    }
+
 }
 
 #[derive(Clone)]
 pub struct AndTable<F: PrimeField>{
-    rows: Vec<(F, F, F)>
+    rows: Vec<(F, F, F)>,
+    gates: Vec<MultiSet<F>>,
 }
 
 impl<F: PrimeField> AndTable<F>{
@@ -124,7 +137,8 @@ impl<F: PrimeField> AndTable<F>{
         }
     
         let table  = AndTable{
-            rows
+            rows,
+            gates: vec![],
         };
 
         table
@@ -162,12 +176,21 @@ impl<F: PrimeField> LookupTable<F> for AndTable<F>{
     fn iter(&self) -> std::slice::Iter<(F, F, F)> {
         self.rows.iter()
     }
+
+    fn add_gate(&mut self, gate: MultiSet<F>) {
+        self.gates.push(gate);
+    }
+
+    fn gates(&self) -> Vec<MultiSet<F>> {
+        self.gates.clone()
+    }
 }
 
 
 #[derive(Clone)]
 pub struct RangeTable<F: PrimeField>{
     rows: Vec<(F, F, F)>,
+    gates: Vec<MultiSet<F>>,
 }
 
 impl<F: PrimeField> RangeTable<F>{
@@ -183,7 +206,8 @@ impl<F: PrimeField> RangeTable<F>{
         }
 
         Self{
-            rows
+            rows,
+            gates: vec![],
         }
     }
 }
@@ -214,6 +238,14 @@ impl<F: PrimeField> LookupTable<F> for RangeTable<F>{
 
     fn iter(&self) -> std::slice::Iter<(F, F, F)> {
         self.rows.iter()
+    }
+
+    fn add_gate(&mut self, gate: MultiSet<F>) {
+        self.gates.push(gate);
+    }
+
+    fn gates(&self) -> Vec<MultiSet<F>> {
+        self.gates.clone()
     }
 }
 

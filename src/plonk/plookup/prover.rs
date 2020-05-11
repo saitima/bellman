@@ -22,6 +22,8 @@ use crate::plonk::fft::cooley_tukey_ntt::*;
 use super::LDE_FACTOR;
 use super::lookup_table::{LookupTable, TableType, RangeTable};
 
+use super::multiset::MultiSet;
+
 // #[derive(Debug, Clone)]
 pub struct ProverAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
     m: usize,
@@ -129,11 +131,14 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Pr
         assert!(self.is_table_initialized);
         
         // TODO: this is ugly implementation, make better
-        for lookup_table in self.lookup_tables.iter(){
+        for (i, lookup_table) in self.lookup_tables.iter().enumerate(){
+            
+            let table_id = self.lookup_tables[i].lookup_table_type_as_fe();
+
             match (table_type.clone(), lookup_table.lookup_type()){
                 (TableType::XOR, TableType::XOR) | (TableType::AND, TableType::AND) => {
                     let a_val = self.get_value(a)?;
-                    let b_val = self.get_value(b)?;
+                    let b_val = self.get_value(b)?;                    
                     let c_val = lookup_table.query(a_val, b_val).expect("should has value");
                     
                     let c = self.alloc(|| {
@@ -144,6 +149,16 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Pr
                     self.wire_assignments[1].push(b_val);
                     self.wire_assignments[2].push(c_val);
                     self.wire_assignments[3].push(E::Fr::zero());
+
+                    // store them also in lookup table object
+                    
+
+                    self.lookup_tables[i].add_gate(MultiSet::from_vec([
+                        a_val,
+                        b_val,
+                        c_val,
+                        table_id,
+                    ]));
             
                     self.n += 1;
                     self.num_standard_lookups += 1;
@@ -161,6 +176,14 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Pr
                     self.wire_assignments[1].push(E::Fr::zero());
                     self.wire_assignments[2].push(E::Fr::zero());
                     self.wire_assignments[3].push(E::Fr::zero());
+
+                    // store them also in lookup table object
+                    self.lookup_tables[i].add_gate(MultiSet::from_vec([
+                        a_val,
+                        E::Fr::zero(),
+                        E::Fr::zero(),
+                        table_id,
+                    ]));
                     
                     self.n += 1;
                     self.num_range_lookups += 1;
@@ -351,72 +374,6 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ProverAssembly<E, P> {
 
 }
 
-use std::cmp::Ordering;
-#[derive(Debug, Clone)]
-pub struct MultiSet<E: Engine>([E::Fr; 4]);
-
-impl<E: Engine> MultiSet<E>{
-    pub fn new()-> Self{
-        Self([E::Fr::zero();4])
-    }
-    pub fn from_vec(vec: [E::Fr;4])-> Self{
-        Self(vec)
-    }
-
-    pub fn scale_and_sum(&self , s: E::Fr) -> E::Fr{
-        let mut scalar = E::Fr::one();
-        let mut sum = E::Fr::zero();
-
-        self.0.iter().for_each(|e| {
-            let mut tmp = e.clone();
-            tmp.mul_assign(&scalar);
-            sum.add_assign(&tmp);
-            scalar.mul_assign(&s);
-        }); 
-
-        sum
-    }
-}
-
-impl<E: Engine> PartialEq for MultiSet<E>{
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.0[0] == other.0[0] && self.0[1] == other.0[1] && self.0[2] == other.0[2] &&  self.0[3] == other.0[3]
-    }
-}
-
-impl<E: Engine> Eq for MultiSet<E>{}
-
-impl<E: Engine> PartialOrd for MultiSet<E>{
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {       
-        Some(self.cmp(other))
-    }
-}
-
-impl<E: Engine> Ord for MultiSet<E>{
-    fn cmp(&self, other: &Self) -> Ordering {
-        // TODO: better handle
-        // table index is not involved comparison
-        let s0 = self.0[0].into_repr();
-        let s1 = self.0[1].into_repr();
-        
-        let o0 = other.0[0].into_repr();
-        let o1 = other.0[1].into_repr();
-
-        if s1 < o1{
-            Ordering::Less
-        }else if s1 > o1{
-            Ordering::Greater
-        }else{
-            if s0 < o0{
-                Ordering::Less
-            }else{
-                Ordering::Greater
-            }
-        }
-    }
-}
 
 // later we can alias traits
 // pub trait PlonkCsWidth3WithNextStep<E: Engine> = ConstraintSystem<E, PlonkCsWidth3WithNextStepParams>;
@@ -724,20 +681,13 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
                 // aggregate lookup tables and gates together
                 // sort([gates of table_1] + table_1) + sort([gates of table_2] + table_2) + .. sort([gates of table_n] + table_n)
-                let mut s_vec: Vec<MultiSet<E>> = vec![MultiSet::new(); n - total_row_size];
+                let mut s_vec: Vec<MultiSet<E::Fr>> = vec![MultiSet::new(); n - total_row_size];
 
-                // TODO: computational bottleneck happens here
-                // consider to store gates inside table
-                for lookup_table in table_polynomials {
+                for lookup_table in table_polynomials.iter() {
                     let mut s_intermediate = vec![];
-                    for ((((l,r), o), lookup), table_index) in witness_assignments[0].as_ref().iter()
-                                                        .zip(witness_assignments[1].as_ref().iter())
-                                                        .zip(witness_assignments[2].as_ref().iter())
-                                                        .zip(lookup_gate_selector.as_ref().iter())
-                                                        .zip(table_index_selector.as_ref().iter()){
-                        if *lookup == E::Fr::one() && *table_index == lookup_table.lookup_table_type_as_fe(){
-                            s_intermediate.push(MultiSet::from_vec([*l, *r, *o, *table_index]));
-                        }
+
+                    for ms in lookup_table.gates().iter(){
+                        s_intermediate.push(ms.clone());
                     }
 
                     for (col1, col2, col3) in lookup_table.iter(){
@@ -2036,27 +1986,5 @@ mod test {
 
         assert!(Fr::zero() < Fr::one());
 
-    }
-
-    #[test]
-    fn test_multiset_sort(){
-        use crate::pairing::bn256::{Bn256, Fr};
-        use super::MultiSet;
-        let one = Fr::one();
-        let two = Fr::from_str("2").unwrap();
-        let three = Fr::from_str("3").unwrap();
-        let four = Fr::from_str("4").unwrap();
-
-        let m0 = MultiSet::<Bn256>([three, two, three, four]);
-        let m1 = MultiSet::<Bn256>([three, two, three, four]);
-        let m2 = MultiSet::<Bn256>([three, two, one, four]);
-        let m3 = MultiSet::<Bn256>([two, two, three, four]);
-
-        assert_ne!(m1, m2);
-        assert_eq!(m0, m1);
-
-        assert!(m1 > m2);
-        assert!(m2 < m3);
-        assert!(m1 > m3);
     }
 }
