@@ -446,7 +446,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         let mut assignment_polynomials = vec![];
         
-        // @TODO:
         for p in full_assignments.clone().into_iter() {
             let p = Polynomial::from_values_unpadded(p)?;
             assignment_polynomials.push(p);
@@ -589,9 +588,16 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
 
         // PLOOKUP         
-        let plookup_lde_factor = 4;
-        let new_domain_size = required_domain_size*plookup_lde_factor;
-        println!("domain: {} new domain: {}", required_domain_size, new_domain_size);
+
+        let plookup_challenge = transcript.get_challenge();
+
+        let mut plookup_challenge_square = plookup_challenge.clone();
+        plookup_challenge_square.mul_assign(&plookup_challenge);
+        let mut plookup_challenge_cube = plookup_challenge_square.clone();
+        plookup_challenge_cube.mul_assign(&plookup_challenge);
+
+        let new_domain_size = required_domain_size*LDE_FACTOR;
+        assert_eq!(LDE_FACTOR, 4 );
         
         let lookup_gate_selector_poly_index = setup.selector_polynomials.len() -3;
         let lookup_gate_selector_poly = setup.selector_polynomials[lookup_gate_selector_poly_index].clone();
@@ -621,6 +627,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 standard_lookup_tables.push(lookup_table);
             }
         }
+        
         let std_lookup_table_values = setup.lookup_table_polynomials.clone();
         let range_lookup_table_values = setup.range_table_polynomials.clone();
 
@@ -638,14 +645,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             range_lookup_table_values_in_monomial.push(t.clone_padded_to_domain()?.ifft(&worker))
         }
 
-
-        // use this challenge until there will be enough entropy to put in transcript
-        let plookup_challenge = E::Fr::from_str("42").unwrap(); 
-        let mut plookup_challenge_square = plookup_challenge.clone();
-        plookup_challenge_square.mul_assign(&plookup_challenge);
-        let mut plookup_challenge_cube = plookup_challenge_square.clone();
-        plookup_challenge_cube.mul_assign(&plookup_challenge);
-
         let mut beta_one = beta.clone();
         beta_one.add_assign(&E::Fr::one());
 
@@ -661,7 +660,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         fn make_plookup_variables<E: Engine>(
             witness_assignments: &[Polynomial<E::Fr, Values>],
             table_polynomials: &[&Box<dyn LookupTable<E::Fr>>],
-            lookup_gate_selector: &Polynomial<E::Fr, Values>,
             table_index_selector: &Polynomial<E::Fr, Values>,
             setup_polynomials: &[Polynomial<E::Fr, Values>],
             challenge: E::Fr, 
@@ -764,7 +762,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let [s_original, witness_original, table_original] = make_plookup_variables::<E>(
                 &assignment_polynomials,
                 &standard_lookup_tables,
-                &lookup_gate_selector,
                 &unpadded_table_selector,
                 &std_lookup_table_values,
                 plookup_challenge,
@@ -846,31 +843,31 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 let z = denominator.clone();
                 let expected = gamma_beta_one.pow([(n) as u64]);
                 assert_eq!(z.as_ref()[0], E::Fr::one()); // z(X)*L_1(x) = 1
-                assert_eq!(z.as_ref()[n], expected); // z(X*w)*L_{n-1}(x) = gamma*(beta+1)^n
-
-                let s = s_original.clone_padded_to_domain()?;
-                
-                // commit s poly
-                let plookup_s_commitment = commit_using_values(
-                    &s, 
-                    &crs_vals, 
-                    &worker
-                )?;
-                plookup_proof.std_s_commitment = plookup_s_commitment;
-                commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.std_s_commitment);
-
-                // commit grand product
-                let plookup_z_commitment = commit_using_values(
-                    &z, 
-                    &crs_vals, 
-                    &worker
-                )?;
-                plookup_proof.std_grand_product_commitment = plookup_z_commitment;
-
-                commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.std_grand_product_commitment);
+                assert_eq!(z.as_ref()[n], expected); // z(X*w)*L_{n-1}(x) = gamma*(beta+1)^n              
 
                 z
             };
+
+            let z_in_monomial = plookup_z.ifft(&worker);
+
+            // commit s poly
+            let plookup_s_commitment = commit_using_monomials(
+                &s_in_monomial.clone(), 
+                &crs_mon, 
+                &worker
+            )?;
+            plookup_proof.std_s_commitment = plookup_s_commitment;
+            commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.std_s_commitment);
+
+            // commit grand product
+            let plookup_z_commitment = commit_using_monomials(
+                &z_in_monomial.clone(), 
+                &crs_mon, 
+                &worker
+            )?;
+            plookup_proof.std_grand_product_commitment = plookup_z_commitment;
+
+            commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.std_grand_product_commitment);
             
             // calculate plookup quotient polynomnial
             // lhs = Z(x)* (\beta + 1) * (\gamma + f(x)) * (\gamma(1 + \beta) + t(x) + \beta * t(x*omega)
@@ -878,7 +875,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             // lhs - rhs = 0 mod Zh
             // t = (lhs - rhs)/Zh
             let witness_in_monomial = witness_original.clone_padded_to_domain()?.ifft(&worker);
-            let z_in_monomial = plookup_z.ifft(&worker);
+            
 
             let mut shifted_z_in_monomial = z_in_monomial.clone();
             shifted_z_in_monomial.distribute_powers(&worker, z_in_monomial.omega);
@@ -903,6 +900,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             quotient_protos[0].mul_assign(&worker, &lookup_gate_selector_lde_4n);
 
             let witness_in_monomial_by_selector = quotient_protos[0].clone().icoset_fft(&worker);
+
+
 
             let  plookup_lhs = {        
                 let mut lhs = quotient_protos[0].clone();
@@ -958,7 +957,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let [s_original, witness_original, table_original] = make_plookup_variables::<E>(
                 &assignment_polynomials,
                 &range_lookup_tables,
-                &range_lookup_gate_selector,
                 &unpadded_table_selector,
                 &range_lookup_table_values,
                 plookup_challenge,
@@ -1022,30 +1020,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
                 assert_eq!(z.as_ref()[0], E::Fr::one()); // z(X)*L_1(x) = 1
                 assert_eq!(z.as_ref()[n], expected); // z(X*w)*L_{n-1}(x) = z(x)*L_n(x) = gamma^n
 
-                let s = s_original.clone_padded_to_domain()?;
-
-                // range s polynomial commitment
-                let plookup_s_commitment = commit_using_values(
-                    &s, 
-                    &crs_vals, 
-                    &worker
-                )?;
-
-                plookup_proof.range_s_commitment = plookup_s_commitment;
-
-                commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.range_s_commitment);
-
-                // range grand product commitment
-                let plookup_z_commitment = commit_using_values(
-                    &z, 
-                    &crs_vals, 
-                    &worker
-                )?;
-
-                plookup_proof.range_grand_product_commitment = plookup_z_commitment;
-
-                commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.range_grand_product_commitment);
-
                 z   
             };
 
@@ -1055,7 +1029,26 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             let z_in_monomial = plookup_z.clone().ifft(&worker);
             let mut shifted_z_in_monomial = z_in_monomial.clone();
             shifted_z_in_monomial.distribute_powers(&worker, z_in_monomial.omega);
+
+            // commit s poly
+            let s_commitment = commit_using_monomials(
+                &s_in_monomial.clone(), 
+                &crs_mon, 
+                &worker
+            )?;
+            plookup_proof.range_s_commitment = s_commitment;
+            commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.range_s_commitment);
+
             
+            // commit grand product
+            let z_commitment = commit_using_monomials(
+                &z_in_monomial.clone(), 
+                &crs_mon, 
+                &worker
+            )?;
+
+            plookup_proof.range_grand_product_commitment = z_commitment;
+            commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.range_grand_product_commitment);
 
             let mut quotient_protos = vec![];
             for p in [
@@ -1124,8 +1117,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         };
 
         // END PLOOKUP
-
-
 
         let alpha = transcript.get_challenge();
 
@@ -1338,6 +1329,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         z_by_omega.mul_assign(&domain.generator);
 
         println!("[p] permuatation challenges gamma beta {} {}", gamma, beta);
+        println!("[v] plookup challenge eta {}", plookup_challenge);
         println!("[p] quotient challenge alpha {}", alpha);
         println!("[p] evaluation challenge z zw {} {}", z, z_by_omega);
 

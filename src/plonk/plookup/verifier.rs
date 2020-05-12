@@ -69,6 +69,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     // commit grand product
     commit_point_as_xy::<E, _>(&mut transcript, &proof.grand_product_commitment);
 
+    let plookup_challenge = transcript.get_challenge();
     
     // commit plookup s polynomial
     commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.std_s_commitment);
@@ -93,6 +94,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     z_by_omega.mul_assign(&domain.generator);
 
     println!("[v] permuatation challenges gamma beta {} {}", gamma, beta);
+    println!("[v] plookup challenge eta {}", plookup_challenge);
     println!("[v] quotient challenge alpha {}", alpha);
     println!("[v] evaluation challenge z zw {} {}", z, z_by_omega);
 
@@ -200,7 +202,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
         // plookup quotients
         // range
-        let plookup_challenge = E::Fr::from_str("42").unwrap();
+        // let plookup_challenge = E::Fr::from_str("42").unwrap();
         let lookup_vanishing_at_z = evaluate_inverse_vanishing_poly_with_last_point_cut(required_domain_size, z);
 
         // std lookup checks
