@@ -93,11 +93,6 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     let mut z_by_omega = z;
     z_by_omega.mul_assign(&domain.generator);
 
-    println!("[v] permuatation challenges gamma beta {} {}", gamma, beta);
-    println!("[v] plookup challenge eta {}", plookup_challenge);
-    println!("[v] quotient challenge alpha {}", alpha);
-    println!("[v] evaluation challenge z zw {} {}", z, z_by_omega);
-
     // commit every claimed value
 
     for el in proof.wire_values_at_z.iter() {
@@ -512,6 +507,10 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         commitments_aggregation.add_assign(&tmp);
     }
 
+    // lookup grand procut
+    multiopening_challenge.mul_assign(&v);
+    commitments_aggregation.add_assign(&plookup_proof.std_grand_product_commitment.mul(multiopening_challenge.into_repr()));
+
     multiopening_challenge.mul_assign(&v); // we skip z(X) at z
 
     // aggregate last wire commitment (that is opened at z*omega)
@@ -525,6 +524,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
     let mut multiopening_challenge_for_values = E::Fr::one();
     let mut aggregated_value = proof.quotient_polynomial_at_z;
+
     for value_at_z in Some(proof.linearization_polynomial_at_z).iter()
             .chain(&proof.wire_values_at_z)
             .chain(&proof.permutation_polynomials_at_z) 
@@ -534,6 +534,13 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
             tmp.mul_assign(&multiopening_challenge_for_values);
             aggregated_value.add_assign(&tmp);
         }
+
+    // lookup grand product eval at z
+    multiopening_challenge_for_values.mul_assign(&v);  
+    let mut tmp = plookup_proof.std_grand_product_at_z.clone();
+    tmp.mul_assign(&multiopening_challenge_for_values);
+    aggregated_value.add_assign(&tmp);
+    
 
     // add parts that are opened at z*omega using `u`
     {
@@ -582,5 +589,31 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         ])
     ).unwrap() == E::Fqk::one();
 
+
+    {
+        // sanity check for lookup grand product opening proof
+        let grand_product_commitment = plookup_proof.std_grand_product_commitment.clone();
+        let grand_product_at_z = plookup_proof.std_grand_product_at_z.clone();
+
+        // f(x) - f(z)
+        let mut numerator = grand_product_commitment.into_projective();
+        numerator.sub_assign(&E::G1Affine::one().mul(grand_product_at_z.into_repr()));
+
+        // x - z
+        let mut denominator = verification_key.g2_elements[1].into_projective();
+        denominator.sub_assign(&E::G2Affine::one().mul(z.into_repr()));
+
+        // openin proof
+        let opening_proof = plookup_proof.opening_proof.clone();
+
+        // compare pairings
+        let lhs = E::pairing(opening_proof,denominator);
+        let rhs = E::pairing(numerator, E::G2Affine::one());
+
+        assert_eq!(lhs, rhs);
+   }
+
+
+    assert!(valid, "pairing check failed");
     Ok(valid)
 }

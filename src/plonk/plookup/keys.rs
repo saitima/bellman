@@ -320,6 +320,8 @@ pub struct PlookupProof<E: Engine>{
     pub range_grand_product_at_z_omega: E::Fr,
     pub range_s_at_z: E::Fr,
     pub range_table_columns_at_z: [E::Fr; 4],
+
+    pub opening_proof: E::G1Affine,
 }
 
 impl<E: Engine> PlookupProof<E>{
@@ -347,6 +349,8 @@ impl<E: Engine> PlookupProof<E>{
             range_grand_product_at_z_omega: E::Fr::zero(),
             range_s_at_z: E::Fr::zero(),
             range_table_columns_at_z: [E::Fr::zero(); 4],
+
+            opening_proof: E::G1Affine::zero(),
         }
     }
 }

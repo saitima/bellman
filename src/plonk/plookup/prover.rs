@@ -1328,11 +1328,6 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         let mut z_by_omega = z;
         z_by_omega.mul_assign(&domain.generator);
 
-        println!("[p] permuatation challenges gamma beta {} {}", gamma, beta);
-        println!("[v] plookup challenge eta {}", plookup_challenge);
-        println!("[p] quotient challenge alpha {}", alpha);
-        println!("[p] evaluation challenge z zw {} {}", z, z_by_omega);
-
         for (idx, p) in witness_polys_in_monomial_form.iter().enumerate() {
             let value_at_z = p.evaluate_at(&worker, z);
             proof.wire_values_at_z.push(value_at_z);
@@ -1778,6 +1773,17 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
 
         debug_assert_eq!(multiopening_challenge, v.pow(&[(1 + 4 + 3) as u64]));
 
+        // plookup grand product
+        multiopening_challenge.mul_assign(&v);
+        poly_to_divide_at_z.add_assign_scaled(&worker, &lookup_std_z_in_monomial, &multiopening_challenge);
+
+        {
+            // open lookup grand product at z for debugging
+            let quotient_of_lookup_z = Polynomial::from_coeffs(divide_single::<E>(lookup_std_z_in_monomial.as_ref(), z))?;
+            plookup_proof.opening_proof = commit_using_monomials(&quotient_of_lookup_z, &crs_mon, &worker)?;
+        }
+        
+
         multiopening_challenge.mul_assign(&v);
 
         let mut poly_to_divide_at_z_omega = z_in_monomial_form;
@@ -1789,7 +1795,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         poly_to_divide_at_z_omega.add_assign_scaled(&worker, &witness_polys_in_monomial_form[3], &multiopening_challenge);
         drop(witness_polys_in_monomial_form);
 
-        debug_assert_eq!(multiopening_challenge, v.pow(&[(1 + 4 + 3 + 1 + 1) as u64]));
+        debug_assert_eq!(multiopening_challenge, v.pow(&[(1 + 4 + 3 + 1 + 1 + 1) as u64]));
 
         // division in monomial form is sequential, so we parallelize the divisions
 
