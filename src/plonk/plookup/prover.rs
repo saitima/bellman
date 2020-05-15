@@ -1322,11 +1322,11 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             proof.quotient_poly_commitments.push(t_part_commitment);
         }
 
-        // draw random point
-
         let z = transcript.get_challenge();
         let mut z_by_omega = z;
         z_by_omega.mul_assign(&domain.generator);
+
+        // draw random point
 
         for (idx, p) in witness_polys_in_monomial_form.iter().enumerate() {
             let value_at_z = p.evaluate_at(&worker, z);
@@ -1751,6 +1751,24 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
             power_of_z.mul_assign(&z_in_domain_size);
         }
 
+
+        // open quotient poly by using parts
+        // t1(x) + t2(x) + t3(x) - z
+        // ---------------------------
+        //          x-z 
+        // 1. sum parts in monomial
+        // 2. sub z (does not necessary) 
+        // 3. quotient by dividing at z
+        // 4. commit quotient (this is proof)
+        // 5. store in proof
+
+        let t_sum = poly_to_divide_at_z.clone();
+
+        let t_quotient = Polynomial::from_coeffs(divide_single::<E>(t_sum.as_ref(), z))?;   
+        plookup_proof.t_opening_proof = commit_using_monomials(&t_quotient, &crs_mon, &worker)?;
+
+
+
         // linearization polynomial
         multiopening_challenge.mul_assign(&v);
         poly_to_divide_at_z.add_assign_scaled(&worker, &r, &multiopening_challenge);
@@ -1774,8 +1792,8 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         debug_assert_eq!(multiopening_challenge, v.pow(&[(1 + 4 + 3) as u64]));
 
         // plookup grand product
-        multiopening_challenge.mul_assign(&v);
-        poly_to_divide_at_z.add_assign_scaled(&worker, &lookup_std_z_in_monomial, &multiopening_challenge);
+        // multiopening_challenge.mul_assign(&v);
+        // poly_to_divide_at_z.add_assign_scaled(&worker, &lookup_std_z_in_monomial, &multiopening_challenge);
 
         {
             // open lookup grand product at z for debugging
@@ -1795,7 +1813,7 @@ impl<E: Engine> ProverAssembly4WithNextStep<E> {
         poly_to_divide_at_z_omega.add_assign_scaled(&worker, &witness_polys_in_monomial_form[3], &multiopening_challenge);
         drop(witness_polys_in_monomial_form);
 
-        debug_assert_eq!(multiopening_challenge, v.pow(&[(1 + 4 + 3 + 1 + 1 + 1) as u64]));
+        debug_assert_eq!(multiopening_challenge, v.pow(&[(1 + 4 + 3 + 1 + 1) as u64]));
 
         // division in monomial form is sequential, so we parallelize the divisions
 
@@ -1946,8 +1964,8 @@ mod test {
 
         assembly.finalize();
 
-        // let worker = Worker::new();
-        let worker = Worker::new_with_cpus(4);
+        let worker = Worker::new();
+        // let worker = Worker::new_with_cpus(4);
 
         let setup = assembly.setup(&worker).unwrap();
 

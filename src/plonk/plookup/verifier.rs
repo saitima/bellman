@@ -507,10 +507,6 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         commitments_aggregation.add_assign(&tmp);
     }
 
-    // lookup grand procut
-    multiopening_challenge.mul_assign(&v);
-    commitments_aggregation.add_assign(&plookup_proof.std_grand_product_commitment.mul(multiopening_challenge.into_repr()));
-
     multiopening_challenge.mul_assign(&v); // we skip z(X) at z
 
     // aggregate last wire commitment (that is opened at z*omega)
@@ -535,11 +531,6 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
             aggregated_value.add_assign(&tmp);
         }
 
-    // lookup grand product eval at z
-    multiopening_challenge_for_values.mul_assign(&v);  
-    let mut tmp = plookup_proof.std_grand_product_at_z.clone();
-    tmp.mul_assign(&multiopening_challenge_for_values);
-    aggregated_value.add_assign(&tmp);
     
 
     // add parts that are opened at z*omega using `u`
@@ -611,6 +602,57 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         let rhs = E::pairing(numerator, E::G2Affine::one());
 
         assert_eq!(lhs, rhs);
+   }
+
+   {
+       // sanity check for quotient polynomial
+       // 
+       // we have t_opening_proof and need to verify against it constituents
+       // which are t1 t2 t3 t4
+       // verification equation: 
+        // ([t_1(x)] + z^n * [t_2(x)] + z^2n * [t_3(x)]  + z^3n * [t_4(x)]) - (t_1(z) + z^n * t_2(z) + z^2n * t_3(z)  + z^3n * t_4(z))
+        // ---------------------------------------------------------------------------------------------------------------------------
+        //                          x-z 
+
+        // 1. aggrage commitments
+        // 2. aggregate evals
+        // 3. mul evals by G1Affine::one()
+        // 4. sub evals from commitments
+        // 5. compute (x-z) 
+        //  - subtract G2AFfine::one().mul(z) from g2[0] in verification key
+        // 6. pairing check 
+
+        // 1
+        // A = [t_1(x)] + z^n * [t_2(x)] + z^2n * [t_3(x)]  + z^3n * [t_4(x)]
+        let mut t_commitments = proof.quotient_poly_commitments.iter().cloned();
+        let mut agg_cmt = t_commitments.next().unwrap().into_projective();
+
+        let mut current = z_in_domain_size;
+        for part in t_commitments {
+            agg_cmt.add_assign(&part.mul(current.into_repr()));
+            current.mul_assign(&z_in_domain_size);
+        }
+
+        // 2
+        // b =t_1(z) + z^n * t_2(z) + z^2n * t_3(z)  + z^3n * t_4(z)
+        let agg_eval = proof.quotient_polynomial_at_z.clone();        
+
+        // 3 & 4
+        // A - b*G1
+        agg_cmt.sub_assign(&E::G1Affine::one().mul(agg_eval.into_repr()));
+
+        // 5
+        let numerator = agg_cmt.clone();
+
+        // x*G2 - z*G2
+        let mut denominator = verification_key.g2_elements[1].into_projective();
+        denominator.sub_assign(&E::G2Affine::one().mul(z.into_repr()));
+
+        // 6 
+        let lhs = E::pairing(plookup_proof.t_opening_proof, denominator); 
+        let rhs = E::pairing(numerator, E::G2Affine::one()); 
+        assert_eq!(lhs, rhs);
+
    }
 
 
