@@ -15,7 +15,7 @@ use super::lookup_table::{LookupTable, TableType, RangeTable};
 
 
 // #[derive(Debug)]
-pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
+pub struct GeneratorAssembly<'a, E: Engine, P: PlonkConstraintSystemParams<E>> {
     m: usize,
     n: usize,
     input_gates: Vec<(P::StateVariables, P::ThisTraceStepCoefficients, P::NextTraceStepCoefficients)>,
@@ -26,7 +26,7 @@ pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
     num_standard_lookups: usize,
     num_range_lookups: usize,
 
-    lookup_tables: Vec<Box<dyn LookupTable<E::Fr>>>,
+    lookup_tables: &'a [Box<dyn LookupTable<E::Fr>>],
     is_table_initialized: bool,
 
 
@@ -35,7 +35,7 @@ pub struct GeneratorAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
     is_finalized: bool
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for GeneratorAssembly<E, P> {
+impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for GeneratorAssembly<'a, E, P> {
     // allocate a variable
     fn alloc<F>(&mut self, _value: F) -> Result<Variable, SynthesisError>
     where
@@ -128,7 +128,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Ge
     }
 }
 
-impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
+impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<'a, E, P> {
     pub fn new() -> Self {
         let tmp = Self {
             n: 0,
@@ -141,7 +141,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
             num_standard_lookups: 0,
             num_range_lookups: 0,
 
-            lookup_tables: vec![],
+            lookup_tables: &[],
             is_table_initialized: false,
 
             inputs_map: vec![],
@@ -164,7 +164,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
             num_standard_lookups: 0,
             num_range_lookups: 0,
 
-            lookup_tables: vec![],
+            lookup_tables: &[],
             is_table_initialized: false,
 
             inputs_map: Vec::with_capacity(num_inputs),
@@ -175,7 +175,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
         tmp
     }
 
-    pub fn new_with_lookup_tables(lookup_tables: Vec<Box<dyn LookupTable<E::Fr>>>) -> Self {
+    pub fn new_with_lookup_tables(lookup_tables: &'a [Box<dyn LookupTable<E::Fr>>]) -> Self {
         let tmp = Self {
             n: 0,
             m: 0,
@@ -257,10 +257,10 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<E, P> {
 // later we can alias traits
 // pub trait PlonkCsWidth3WithNextStep<E: Engine> = ConstraintSystem<E, PlonkCsWidth3WithNextStepParams>;
 
-pub type GeneratorAssembly3WithNextStep<E> = GeneratorAssembly<E, PlonkCsWidth3WithNextStepParams>;
-pub type GeneratorAssembly4WithNextStep<E> = GeneratorAssembly<E, PlonkCsWidth4WithNextStepParams>;
+pub type GeneratorAssembly3WithNextStep<'a, E> = GeneratorAssembly<'a, E, PlonkCsWidth3WithNextStepParams>;
+pub type GeneratorAssembly4WithNextStep<'a, E> = GeneratorAssembly<'a, E, PlonkCsWidth4WithNextStepParams>;
 
-impl<E: Engine> GeneratorAssembly4WithNextStep<E> {
+impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
     pub fn make_selector_polynomials(
         &self, 
         worker: &Worker
