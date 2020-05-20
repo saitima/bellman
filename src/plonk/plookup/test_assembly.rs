@@ -1,7 +1,7 @@
 use crate::pairing::ff::{Field, PrimeField};
-use crate::pairing::{Engine};
+use crate::pairing::Engine;
 
-use crate::{SynthesisError};
+use crate::SynthesisError;
 use std::marker::PhantomData;
 
 use super::cs::*;
@@ -24,14 +24,14 @@ pub struct TestAssembly<E: Engine, P: PlonkConstraintSystemParams<E>> {
 
     next_step_leftover_from_previous_gate: Option<(E::Fr, P::NextTraceStepCoefficients)>,
 
-    _marker: std::marker::PhantomData<P>
+    _marker: std::marker::PhantomData<P>,
 }
 
 impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for TestAssembly<E, P> {
     // allocate a variable
     fn alloc<F>(&mut self, value: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<E::Fr, SynthesisError> 
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
     {
         let value = value()?;
 
@@ -47,7 +47,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Te
     // allocate an input variable
     fn alloc_input<F>(&mut self, value: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<E::Fr, SynthesisError> 
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
     {
         let value = value()?;
 
@@ -60,22 +60,20 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Te
         self.n += 1;
 
         Ok(input_var)
-
     }
 
     // allocate an abstract gate
-    fn new_gate(&mut self, 
-        variables: P::StateVariables, 
+    fn new_gate(
+        &mut self,
+        variables: P::StateVariables,
         this_step_coeffs: P::ThisTraceStepCoefficients,
-        next_step_coeffs: P::NextTraceStepCoefficients
+        next_step_coeffs: P::NextTraceStepCoefficients,
     ) -> Result<(), SynthesisError> {
         // check that leftover of this gate is satisfied
 
         if let Some((value_leftover, coeffs)) = self.next_step_leftover_from_previous_gate.take() {
             let mut leftover = value_leftover;
-            for (&var, coeff) in variables.as_ref().iter().rev()
-                            .zip(coeffs.as_ref().iter()) 
-            {
+            for (&var, coeff) in variables.as_ref().iter().rev().zip(coeffs.as_ref().iter()) {
                 let mut value = self.get_value(var)?;
                 value.mul_assign(&coeff);
 
@@ -94,9 +92,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Te
         let mut this_step_coeffs_iter = this_step_coeffs.as_ref().iter();
 
         // first take an LC
-        for (&var, coeff) in variables.as_ref().iter()
-                            .zip(&mut this_step_coeffs_iter) 
-        {
+        for (&var, coeff) in variables.as_ref().iter().zip(&mut this_step_coeffs_iter) {
             let mut value = self.get_value(var)?;
             value.mul_assign(&coeff);
 
@@ -118,26 +114,22 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Te
             if next_step_coeffs.as_ref()[0].is_zero() == false {
                 self.next_step_leftover_from_previous_gate = Some((gate_value, next_step_coeffs));
             }
-            // assert!(self.next_step_vars.is_some());
-            // let next_step_vars = self.next_step_vars.take().expect("must have some next step variables")
-            // for (&var, coeff) in variables.as_ref().iter().rev()
-            //                 .zip(next_step_coeffs.as_ref().iter()) 
-            // {
-            //     let mut value = self.get_value(var)?;
-            //     value.mul_assign(&coeff);
+        // assert!(self.next_step_vars.is_some());
+        // let next_step_vars = self.next_step_vars.take().expect("must have some next step variables")
+        // for (&var, coeff) in variables.as_ref().iter().rev()
+        //                 .zip(next_step_coeffs.as_ref().iter())
+        // {
+        //     let mut value = self.get_value(var)?;
+        //     value.mul_assign(&coeff);
 
-            //     gate_value.add_assign(&value);
-            // }
+        //     gate_value.add_assign(&value);
+        // }
         } else {
             if gate_value.is_zero() == false {
                 return Err(SynthesisError::Unsatisfiable);
             }
         }
 
-        
-
-        
-        
         self.n += 1;
 
         Ok(())
@@ -152,12 +144,8 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Te
             Variable(Index::Input(0)) => {
                 return Err(SynthesisError::AssignmentMissing);
             }
-            Variable(Index::Input(input)) => {
-                self.input_assingments[input - 1]
-            },
-            Variable(Index::Aux(aux)) => {
-                self.aux_assingments[aux - 1]
-            }
+            Variable(Index::Input(input)) => self.input_assingments[input - 1],
+            Variable(Index::Aux(aux)) => self.aux_assingments[aux - 1],
         };
 
         Ok(value)
@@ -167,7 +155,12 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for Te
         self.dummy_variable()
     }
 
-    fn read_from_table(&mut self, _table_type: TableType, _a: Variable, _b: Variable) -> Result<Variable, SynthesisError>{
+    fn read_from_table(
+        &mut self,
+        _table_type: TableType,
+        _a: Variable,
+        _b: Variable,
+    ) -> Result<Variable, SynthesisError> {
         Ok(self.get_dummy_variable())
     }
 }
@@ -190,7 +183,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> TestAssembly<E, P> {
 
             next_step_leftover_from_previous_gate: None,
 
-            _marker: std::marker::PhantomData
+            _marker: std::marker::PhantomData,
         };
 
         tmp
@@ -213,7 +206,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> TestAssembly<E, P> {
 
             next_step_leftover_from_previous_gate: None,
 
-            _marker: std::marker::PhantomData
+            _marker: std::marker::PhantomData,
         };
 
         tmp

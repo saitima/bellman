@@ -1,25 +1,32 @@
 use crate::pairing::ff::{Field, PrimeField};
-use crate::pairing::{Engine};
+use crate::pairing::Engine;
 
-use crate::{SynthesisError};
+use crate::plonk::domains::*;
 use crate::plonk::polynomials::*;
 use crate::worker::Worker;
-use crate::plonk::domains::*;
+use crate::SynthesisError;
 
 use std::marker::PhantomData;
 
 use super::cs::*;
 use super::keys::SetupPolynomials;
-use super::utils::{make_non_residues};
-use super::lookup_table::{LookupTable, TableType, RangeTable};
-
+use super::lookup_table::{LookupTable, RangeTable, TableType};
+use super::utils::make_non_residues;
 
 // #[derive(Debug)]
 pub struct GeneratorAssembly<'a, E: Engine, P: PlonkConstraintSystemParams<E>> {
     m: usize,
     n: usize,
-    input_gates: Vec<(P::StateVariables, P::ThisTraceStepCoefficients, P::NextTraceStepCoefficients)>,
-    aux_gates: Vec<(P::StateVariables, P::ThisTraceStepCoefficients, P::NextTraceStepCoefficients)>,
+    input_gates: Vec<(
+        P::StateVariables,
+        P::ThisTraceStepCoefficients,
+        P::NextTraceStepCoefficients,
+    )>,
+    aux_gates: Vec<(
+        P::StateVariables,
+        P::ThisTraceStepCoefficients,
+        P::NextTraceStepCoefficients,
+    )>,
 
     num_inputs: usize,
     num_aux: usize,
@@ -29,19 +36,19 @@ pub struct GeneratorAssembly<'a, E: Engine, P: PlonkConstraintSystemParams<E>> {
     lookup_tables: &'a [Box<dyn LookupTable<E::Fr>>],
     is_table_initialized: bool,
 
-
     inputs_map: Vec<usize>,
 
-    is_finalized: bool
+    is_finalized: bool,
 }
 
-impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> for GeneratorAssembly<'a, E, P> {
+impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P>
+    for GeneratorAssembly<'a, E, P>
+{
     // allocate a variable
     fn alloc<F>(&mut self, _value: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<E::Fr, SynthesisError> 
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
     {
-
         self.num_aux += 1;
         let index = self.num_aux;
 
@@ -51,9 +58,8 @@ impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> fo
     // allocate an input variable
     fn alloc_input<F>(&mut self, _value: F) -> Result<Variable, SynthesisError>
     where
-        F: FnOnce() -> Result<E::Fr, SynthesisError> 
+        F: FnOnce() -> Result<E::Fr, SynthesisError>,
     {
-
         self.num_inputs += 1;
         let index = self.num_inputs;
 
@@ -66,20 +72,22 @@ impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> fo
         this_step_coeffs.negate(); // we use -1 here to later add to the constants polynomial using + sign
         let next_step_coeffs = P::NextTraceStepCoefficients::empty();
 
-        self.input_gates.push((vars, this_step_coeffs, next_step_coeffs));
+        self.input_gates
+            .push((vars, this_step_coeffs, next_step_coeffs));
         self.n += 1;
 
         Ok(input_var)
     }
 
     // allocate an abstract gate
-    fn new_gate(&mut self, 
-        variables: P::StateVariables, 
+    fn new_gate(
+        &mut self,
+        variables: P::StateVariables,
         this_step_coeffs: P::ThisTraceStepCoefficients,
-        next_step_coeffs: P::NextTraceStepCoefficients
-    ) -> Result<(), SynthesisError>
-    {
-        self.aux_gates.push((variables, this_step_coeffs, next_step_coeffs));
+        next_step_coeffs: P::NextTraceStepCoefficients,
+    ) -> Result<(), SynthesisError> {
+        self.aux_gates
+            .push((variables, this_step_coeffs, next_step_coeffs));
         self.n += 1;
 
         Ok(())
@@ -94,30 +102,41 @@ impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> ConstraintSystem<E, P> fo
         self.dummy_variable()
     }
 
-    fn read_from_table(&mut self, table_type: TableType, _a: Variable, _b: Variable) -> Result<Variable, SynthesisError>{
+    fn read_from_table(
+        &mut self,
+        table_type: TableType,
+        _a: Variable,
+        _b: Variable,
+    ) -> Result<Variable, SynthesisError> {
         assert!(self.is_table_initialized);
 
         let mut lookup_table_type_as_fe = E::Fr::zero();
         let mut is_table_found = false;
-        
+
         // rewrite this ugly for loop
-        for t in self.lookup_tables.iter(){
-            if table_type.to_string() == t.lookup_type().to_string(){
+        for t in self.lookup_tables.iter() {
+            if table_type.to_string() == t.lookup_type().to_string() {
                 lookup_table_type_as_fe = t.lookup_table_type_as_fe();
                 is_table_found = true;
                 break;
             }
         }
-        if !is_table_found{
-            return Err(SynthesisError::Unsatisfiable)
+        if !is_table_found {
+            return Err(SynthesisError::Unsatisfiable);
         }
 
-        let variables = P::StateVariables::from_variables(&vec![self.get_dummy_variable();4]);
+        let variables = P::StateVariables::from_variables(&vec![self.get_dummy_variable(); 4]);
         let mut coeffs = vec![E::Fr::zero(); 9];
         match table_type {
-            TableType::XOR | TableType::AND => {coeffs[6] = E::Fr::one(); self.num_standard_lookups += 1},
-            TableType::Range => {coeffs[7] = E::Fr::one(); self.num_range_lookups +=1},
-            _ => ()
+            TableType::XOR | TableType::AND => {
+                coeffs[6] = E::Fr::one();
+                self.num_standard_lookups += 1
+            }
+            TableType::Range => {
+                coeffs[7] = E::Fr::one();
+                self.num_range_lookups += 1
+            }
+            _ => (),
         }
         coeffs[8] = lookup_table_type_as_fe;
         let this_step_coeffs = P::ThisTraceStepCoefficients::from_coeffs(&coeffs);
@@ -189,7 +208,6 @@ impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<'a, E, 
 
             lookup_tables: lookup_tables,
 
-
             is_table_initialized: true,
 
             inputs_map: vec![],
@@ -213,60 +231,64 @@ impl<'a, E: Engine, P: PlonkConstraintSystemParams<E>> GeneratorAssembly<'a, E, 
         if self.is_finalized {
             return;
         }
-        let mut standard_table_size  = 0;
-        let mut range_table_size  = 0;
+        let mut standard_table_size = 0;
+        let mut range_table_size = 0;
 
-        for table in self.lookup_tables.iter(){
-            match table.lookup_type(){
-                TableType::Range => { range_table_size += table.size() },
-                _ => { standard_table_size += table.size() },
+        for table in self.lookup_tables.iter() {
+            match table.lookup_type() {
+                TableType::Range => range_table_size += table.size(),
+                _ => standard_table_size += table.size(),
             }
-        } 
+        }
 
         let num_standard_lookup_gates = self.num_standard_lookups;
         let num_range_lookup_gates = self.num_range_lookups;
 
         let filled_gates = self.n + self.num_inputs;
 
-
         let n = filled_gates
-                .max(standard_table_size + num_standard_lookup_gates)
-                .max(range_table_size + num_range_lookup_gates);
+            .max(standard_table_size + num_standard_lookup_gates)
+            .max(range_table_size + num_range_lookup_gates);
 
-
-        if (n+1).is_power_of_two() {
+        if (n + 1).is_power_of_two() {
             self.is_finalized = true;
             return;
         }
 
-        for _ in (self.n+1)..(n+1).next_power_of_two(){
-            let variables = P::StateVariables::from_variables(&vec![self.get_dummy_variable();4]);            
+        for _ in (self.n + 1)..(n + 1).next_power_of_two() {
+            let variables = P::StateVariables::from_variables(&vec![self.get_dummy_variable(); 4]);
             self.new_gate(
-                variables, 
-                P::ThisTraceStepCoefficients::empty(), 
+                variables,
+                P::ThisTraceStepCoefficients::empty(),
                 P::NextTraceStepCoefficients::empty(),
-            ).unwrap(); // TODO: change func signature to handle Result?
+            )
+            .unwrap(); // TODO: change func signature to handle Result?
         }
 
         println!("generator gates {}", self.n);
 
         self.is_finalized = true;
-    }   
+    }
 }
 
 // later we can alias traits
 // pub trait PlonkCsWidth3WithNextStep<E: Engine> = ConstraintSystem<E, PlonkCsWidth3WithNextStepParams>;
 
-pub type GeneratorAssembly3WithNextStep<'a, E> = GeneratorAssembly<'a, E, PlonkCsWidth3WithNextStepParams>;
-pub type GeneratorAssembly4WithNextStep<'a, E> = GeneratorAssembly<'a, E, PlonkCsWidth4WithNextStepParams>;
+pub type GeneratorAssembly3WithNextStep<'a, E> =
+    GeneratorAssembly<'a, E, PlonkCsWidth3WithNextStepParams>;
+pub type GeneratorAssembly4WithNextStep<'a, E> =
+    GeneratorAssembly<'a, E, PlonkCsWidth4WithNextStepParams>;
 
 impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
     pub fn make_selector_polynomials(
-        &self, 
-        worker: &Worker
+        &self,
+        worker: &Worker,
     ) -> Result<
-    ([Polynomial::<E::Fr, Values>; 9], [Polynomial::<E::Fr, Values>; 1]), 
-    SynthesisError
+        (
+            [Polynomial<E::Fr, Values>; 9],
+            [Polynomial<E::Fr, Values>; 1],
+        ),
+        SynthesisError,
     > {
         assert!(self.is_finalized);
         let total_num_gates = self.input_gates.len() + self.aux_gates.len();
@@ -283,9 +305,7 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
         let mut q_d_next = vec![E::Fr::zero(); total_num_gates];
 
         // expect a small number of inputs
-        for (gate, q_a) in self.input_gates.iter()
-                                            .zip(q_a.iter_mut())
-        {
+        for (gate, q_a) in self.input_gates.iter().zip(q_a.iter_mut()) {
             let mut tmp = gate.1[0];
             tmp.negate();
             // -a + const = 0, where const will come from verifier
@@ -311,45 +331,61 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
         debug_assert!(self.aux_gates.len() == q_a_aux.len());
 
         worker.scope(self.aux_gates.len(), |scope, chunk| {
-            for ((((((((((gate, q_a), q_b), q_c), q_d), q_m), q_const), q_lookup), q_range),q_table_index), q_d_next) 
-                in self.aux_gates.chunks(chunk)
-                    .zip(q_a_aux.chunks_mut(chunk))
-                    .zip(q_b_aux.chunks_mut(chunk))
-                    .zip(q_c_aux.chunks_mut(chunk))
-                    .zip(q_d_aux.chunks_mut(chunk))
-                    .zip(q_m_aux.chunks_mut(chunk))
-                    .zip(q_const_aux.chunks_mut(chunk))
-                    .zip(q_lookup_aux.chunks_mut(chunk))
-                    .zip(q_range_aux.chunks_mut(chunk))
-                    .zip(q_table_index_aux.chunks_mut(chunk))
-                    .zip(q_d_next_aux.chunks_mut(chunk))
+            for (
+                (
+                    ((((((((gate, q_a), q_b), q_c), q_d), q_m), q_const), q_lookup), q_range),
+                    q_table_index,
+                ),
+                q_d_next,
+            ) in self
+                .aux_gates
+                .chunks(chunk)
+                .zip(q_a_aux.chunks_mut(chunk))
+                .zip(q_b_aux.chunks_mut(chunk))
+                .zip(q_c_aux.chunks_mut(chunk))
+                .zip(q_d_aux.chunks_mut(chunk))
+                .zip(q_m_aux.chunks_mut(chunk))
+                .zip(q_const_aux.chunks_mut(chunk))
+                .zip(q_lookup_aux.chunks_mut(chunk))
+                .zip(q_range_aux.chunks_mut(chunk))
+                .zip(q_table_index_aux.chunks_mut(chunk))
+                .zip(q_d_next_aux.chunks_mut(chunk))
             {
                 scope.spawn(move |_| {
-                    for ((((((((((gate, q_a), q_b), q_c), q_d), q_m), q_const), q_lookup), q_range), q_table_index), q_d_next) 
-                    in gate.iter()
-                            .zip(q_a.iter_mut())
-                            .zip(q_b.iter_mut())
-                            .zip(q_c.iter_mut())
-                            .zip(q_d.iter_mut())
-                            .zip(q_m.iter_mut())
-                            .zip(q_const.iter_mut())
-                            .zip(q_lookup.iter_mut())
-                            .zip(q_range.iter_mut())
-                            .zip(q_table_index.iter_mut())
-                            .zip(q_d_next.iter_mut())
-                        {
-                            *q_a = gate.1[0];
-                            *q_b = gate.1[1];
-                            *q_c = gate.1[2];
-                            *q_d = gate.1[3];
-                            *q_m = gate.1[4];
-                            *q_const = gate.1[5];
-                            *q_lookup = gate.1[6];
-                            *q_range = gate.1[7];
-                            *q_table_index = gate.1[8];
+                    for (
+                        (
+                            (
+                                (((((((gate, q_a), q_b), q_c), q_d), q_m), q_const), q_lookup),
+                                q_range,
+                            ),
+                            q_table_index,
+                        ),
+                        q_d_next,
+                    ) in gate
+                        .iter()
+                        .zip(q_a.iter_mut())
+                        .zip(q_b.iter_mut())
+                        .zip(q_c.iter_mut())
+                        .zip(q_d.iter_mut())
+                        .zip(q_m.iter_mut())
+                        .zip(q_const.iter_mut())
+                        .zip(q_lookup.iter_mut())
+                        .zip(q_range.iter_mut())
+                        .zip(q_table_index.iter_mut())
+                        .zip(q_d_next.iter_mut())
+                    {
+                        *q_a = gate.1[0];
+                        *q_b = gate.1[1];
+                        *q_c = gate.1[2];
+                        *q_d = gate.1[3];
+                        *q_m = gate.1[4];
+                        *q_const = gate.1[5];
+                        *q_lookup = gate.1[6];
+                        *q_range = gate.1[7];
+                        *q_table_index = gate.1[8];
 
-                            *q_d_next = gate.2[0];
-                        }
+                        *q_d_next = gate.2[0];
+                    }
                 });
             }
         });
@@ -368,10 +404,23 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
 
         let q_d_next = Polynomial::from_values(q_d_next)?;
 
-        Ok(([q_a, q_b, q_c, q_d, q_m, q_const, q_lookup, q_range, q_table_index], [q_d_next]))
+        Ok((
+            [
+                q_a,
+                q_b,
+                q_c,
+                q_d,
+                q_m,
+                q_const,
+                q_lookup,
+                q_range,
+                q_table_index,
+            ],
+            [q_d_next],
+        ))
     }
 
-    pub(crate) fn make_permutations(&self, worker: &Worker) -> [Polynomial::<E::Fr, Values>; 4] {
+    pub(crate) fn make_permutations(&self, worker: &Worker) -> [Polynomial<E::Fr, Values>; 4] {
         assert!(self.is_finalized);
 
         let num_gates = self.input_gates.len() + self.aux_gates.len();
@@ -381,24 +430,23 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
         let mut partitions = vec![vec![]; num_partitions + 1];
 
         // gate_idx is zero-enumerated here
-        for (gate_idx, (vars, _, _)) in self.input_gates.iter().chain(&self.aux_gates).enumerate()
-        {
+        for (gate_idx, (vars, _, _)) in self.input_gates.iter().chain(&self.aux_gates).enumerate() {
             for (var_index_in_gate, v) in vars.iter().enumerate() {
                 match v {
                     Variable(Index::Aux(0)) => {
                         // Dummy variables do not participate in the permutation
-                    },
+                    }
                     Variable(Index::Input(0)) => {
                         unreachable!("There must be no input with index 0");
-                    },
+                    }
                     Variable(Index::Input(index)) => {
                         let i = *index; // inputs are [1, num_inputs]
-                        partitions[i].push((var_index_in_gate, gate_idx+1));
-                    },
+                        partitions[i].push((var_index_in_gate, gate_idx + 1));
+                    }
                     Variable(Index::Aux(index)) => {
                         let i = index + num_inputs; // aux are [num_inputs + 1, ..]
-                        partitions[i].push((var_index_in_gate, gate_idx+1));
-                    },
+                        partitions[i].push((var_index_in_gate, gate_idx + 1));
+                    }
                 }
             }
         }
@@ -406,17 +454,17 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
         // sanity check
         assert_eq!(partitions[0].len(), 0);
 
-        let domain = Domain::new_for_size(num_gates as u64).expect("must have enough roots of unity to fit the circuit");
+        let domain = Domain::new_for_size(num_gates as u64)
+            .expect("must have enough roots of unity to fit the circuit");
 
         // now we need to make root at it's cosets
-        let domain_elements = materialize_domain_elements_with_natural_enumeration(
-            &domain, &worker
-        );
+        let domain_elements =
+            materialize_domain_elements_with_natural_enumeration(&domain, &worker);
 
         // domain_elements.pop().unwrap();
 
-        use crate::ff::SqrtField;
         use crate::ff::LegendreSymbol;
+        use crate::ff::SqrtField;
 
         let mut non_residues = vec![];
         non_residues.push(E::Fr::one());
@@ -460,9 +508,7 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
             // let permutation = partition.clone();
             // permutations[i] = permutation;
 
-            for (original, new) in partition.into_iter()
-                                    .zip(permutation.into_iter()) 
-            {
+            for (original, new) in partition.into_iter().zip(permutation.into_iter()) {
                 // (column_idx, trace_step_idx)
                 let new_zero_enumerated = new.1 - 1;
                 let mut new_value = domain_elements[new_zero_enumerated];
@@ -474,21 +520,11 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
 
                 // check to what witness polynomial the variable belongs
                 let place_into = match original.0 {
-                    0 => {
-                        sigma_1.as_mut()
-                    },
-                    1 => {
-                        sigma_2.as_mut()
-                    },
-                    2 => {
-                        sigma_3.as_mut()
-                    },
-                    3 => {
-                        sigma_4.as_mut()
-                    },
-                    _ => {
-                        unreachable!()
-                    }
+                    0 => sigma_1.as_mut(),
+                    1 => sigma_2.as_mut(),
+                    2 => sigma_3.as_mut(),
+                    3 => sigma_4.as_mut(),
+                    _ => unreachable!(),
                 };
 
                 let original_zero_enumerated = original.1 - 1;
@@ -504,26 +540,34 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
         [sigma_1, sigma_2, sigma_3, sigma_4]
     }
 
-    pub fn make_lookup_table_polynomials(&self) -> Result<Vec<Polynomial<E::Fr, Values>>, SynthesisError>{
+    pub fn make_lookup_table_polynomials(
+        &self,
+    ) -> Result<Vec<Polynomial<E::Fr, Values>>, SynthesisError> {
         assert!(self.is_table_initialized);
 
         let mut total_row_count = 0;
 
-        let standard_lookup_tables = self.lookup_tables.iter().filter(|t| t.lookup_type() != TableType::Range);
+        let standard_lookup_tables = self
+            .lookup_tables
+            .iter()
+            .filter(|t| t.lookup_type() != TableType::Range);
 
-        for lookup_table in standard_lookup_tables.clone(){
-            total_row_count += lookup_table.size();            
+        for lookup_table in standard_lookup_tables.clone() {
+            total_row_count += lookup_table.size();
         }
 
         // prepend zeroes
-        let mut t1_values = vec![E::Fr::zero(); self.n-total_row_count];
-        let mut t2_values = vec![E::Fr::zero(); self.n-total_row_count];
-        let mut t3_values = vec![E::Fr::zero(); self.n-total_row_count];
-        let mut t4_values = vec![E::Fr::zero(); self.n-total_row_count];
+        let mut t1_values = vec![E::Fr::zero(); self.n - total_row_count];
+        let mut t2_values = vec![E::Fr::zero(); self.n - total_row_count];
+        let mut t3_values = vec![E::Fr::zero(); self.n - total_row_count];
+        let mut t4_values = vec![E::Fr::zero(); self.n - total_row_count];
 
-        for lookup_table in standard_lookup_tables{
-            assert_ne!(lookup_table.lookup_type().to_string(), TableType::Range.to_string());
-            for row in lookup_table.iter(){
+        for lookup_table in standard_lookup_tables {
+            assert_ne!(
+                lookup_table.lookup_type().to_string(),
+                TableType::Range.to_string()
+            );
+            for row in lookup_table.iter() {
                 t1_values.push(row.0);
                 t2_values.push(row.1);
                 t3_values.push(row.2);
@@ -539,26 +583,34 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
         Ok(vec![t1, t2, t3, t4])
     }
 
-    pub fn make_range_lookup_table_polynomials(&self) -> Result<Vec<Polynomial<E::Fr, Values>>, SynthesisError>{
+    pub fn make_range_lookup_table_polynomials(
+        &self,
+    ) -> Result<Vec<Polynomial<E::Fr, Values>>, SynthesisError> {
         assert!(self.is_table_initialized);
 
         let mut total_row_count = 0;
 
-        let range_lookup_tables = self.lookup_tables.iter().filter(|t| t.lookup_type() == TableType::Range);
+        let range_lookup_tables = self
+            .lookup_tables
+            .iter()
+            .filter(|t| t.lookup_type() == TableType::Range);
 
-        for lookup_table in range_lookup_tables.clone(){
-            total_row_count += lookup_table.size();            
+        for lookup_table in range_lookup_tables.clone() {
+            total_row_count += lookup_table.size();
         }
 
         // prepend zeroes
-        let mut t1_values = vec![E::Fr::zero(); self.n-total_row_count];
-        let mut t2_values = vec![E::Fr::zero(); self.n-total_row_count];
-        let mut t3_values = vec![E::Fr::zero(); self.n-total_row_count];
-        let mut t4_values = vec![E::Fr::zero(); self.n-total_row_count];
+        let mut t1_values = vec![E::Fr::zero(); self.n - total_row_count];
+        let mut t2_values = vec![E::Fr::zero(); self.n - total_row_count];
+        let mut t3_values = vec![E::Fr::zero(); self.n - total_row_count];
+        let mut t4_values = vec![E::Fr::zero(); self.n - total_row_count];
 
-        for lookup_table in range_lookup_tables{
-            assert_eq!(lookup_table.lookup_type().to_string(), TableType::Range.to_string());
-            for row in lookup_table.iter(){
+        for lookup_table in range_lookup_tables {
+            assert_eq!(
+                lookup_table.lookup_type().to_string(),
+                TableType::Range.to_string()
+            );
+            for row in lookup_table.iter() {
                 t1_values.push(row.0);
                 t2_values.push(row.1);
                 t3_values.push(row.2);
@@ -574,9 +626,10 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
         Ok(vec![t1, t2, t3, t4])
     }
 
-
-
-    pub fn setup(self, worker: &Worker) -> Result<SetupPolynomials<E, PlonkCsWidth4WithNextStepParams>, SynthesisError> {
+    pub fn setup(
+        self,
+        worker: &Worker,
+    ) -> Result<SetupPolynomials<E, PlonkCsWidth4WithNextStepParams>, SynthesisError> {
         assert!(self.is_finalized);
 
         let n = self.n;
@@ -584,12 +637,11 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
 
         let [sigma_1, sigma_2, sigma_3, sigma_4] = self.make_permutations(&worker);
 
-        let ([q_a, q_b, q_c, q_d, q_m,q_const, q_lookup, q_range, q_table_index],
-            [q_d_next]) = self.make_selector_polynomials(&worker)?;
+        let ([q_a, q_b, q_c, q_d, q_m, q_const, q_lookup, q_range, q_table_index], [q_d_next]) =
+            self.make_selector_polynomials(&worker)?;
 
         let standard_lookup_table_polynomials = self.make_lookup_table_polynomials()?;
         let range_lookup_table_polynomials = self.make_range_lookup_table_polynomials()?;
-
 
         drop(self);
 
@@ -610,18 +662,27 @@ impl<'a, E: Engine> GeneratorAssembly4WithNextStep<'a, E> {
 
         let q_d_next = q_d_next.ifft(&worker);
 
-
         let setup = SetupPolynomials::<E, PlonkCsWidth4WithNextStepParams> {
             n,
             num_inputs,
-            selector_polynomials: vec![q_a, q_b, q_c, q_d, q_m, q_const, q_lookup, q_range, q_table_index],
+            selector_polynomials: vec![
+                q_a,
+                q_b,
+                q_c,
+                q_d,
+                q_m,
+                q_const,
+                q_lookup,
+                q_range,
+                q_table_index,
+            ],
             next_step_selector_polynomials: vec![q_d_next],
             permutation_polynomials: vec![sigma_1, sigma_2, sigma_3, sigma_4],
 
             lookup_table_polynomials: standard_lookup_table_polynomials,
             range_table_polynomials: range_lookup_table_polynomials,
-        
-            _marker: std::marker::PhantomData
+
+            _marker: std::marker::PhantomData,
         };
 
         Ok(setup)
@@ -634,33 +695,28 @@ mod test {
 
     use crate::pairing::Engine;
 
-    struct TestCircuit4<E:Engine>{
-        _marker: PhantomData<E>
+    struct TestCircuit4<E: Engine> {
+        _marker: PhantomData<E>,
     }
 
     impl<E: Engine> Circuit<E, PlonkCsWidth4WithNextStepParams> for TestCircuit4<E> {
-        fn synthesize<CS: ConstraintSystem<E, PlonkCsWidth4WithNextStepParams> >(&self, cs: &mut CS) -> Result<(), SynthesisError> {
-            let a = cs.alloc(|| {
-                Ok(E::Fr::from_str("10").unwrap())
-            })?;
+        fn synthesize<CS: ConstraintSystem<E, PlonkCsWidth4WithNextStepParams>>(
+            &self,
+            cs: &mut CS,
+        ) -> Result<(), SynthesisError> {
+            let a = cs.alloc(|| Ok(E::Fr::from_str("10").unwrap()))?;
 
             println!("A = {:?}", a);
 
-            let b = cs.alloc(|| {
-                Ok(E::Fr::from_str("20").unwrap())
-            })?;
+            let b = cs.alloc(|| Ok(E::Fr::from_str("20").unwrap()))?;
 
             println!("B = {:?}", b);
 
-            let c = cs.alloc(|| {
-                Ok(E::Fr::from_str("200").unwrap())
-            })?;
+            let c = cs.alloc(|| Ok(E::Fr::from_str("200").unwrap()))?;
 
             println!("C = {:?}", c);
 
-            let d = cs.alloc(|| {
-                Ok(E::Fr::from_str("100").unwrap())
-            })?;
+            let d = cs.alloc(|| Ok(E::Fr::from_str("100").unwrap()))?;
 
             println!("D = {:?}", d);
 
@@ -678,36 +734,45 @@ mod test {
 
             // 2a - b == 0
             cs.new_gate(
-                [a, b, dummy, dummy], 
+                [a, b, dummy, dummy],
                 [two, negative_one, zero, zero, zero, zero, zero, zero, zero],
-                [zero]
+                [zero],
             )?;
 
             // 10b - c = 0
             let ten = E::Fr::from_str("10").unwrap();
 
             cs.new_gate(
-                [b, c, dummy, dummy], 
+                [b, c, dummy, dummy],
                 [ten, negative_one, zero, zero, zero, zero, zero, zero, zero],
-                [zero]
+                [zero],
             )?;
 
-            // c - a*b == 0 
+            // c - a*b == 0
 
             cs.new_gate(
-                [a, b, dummy, c], 
+                [a, b, dummy, c],
                 [zero, zero, zero, negative_one, one, zero, zero, zero, zero],
-                [zero]
+                [zero],
             )?;
 
             // 10a + 10b - c - d == 0
 
             cs.new_gate(
-                [a, b, c, d], 
-                [ten, ten, negative_one, negative_one, zero, zero, zero, zero, zero],
-                [zero]
+                [a, b, c, d],
+                [
+                    ten,
+                    ten,
+                    negative_one,
+                    negative_one,
+                    zero,
+                    zero,
+                    zero,
+                    zero,
+                    zero,
+                ],
+                [zero],
             )?;
-
 
             Ok(())
         }
@@ -716,15 +781,13 @@ mod test {
     #[test]
     fn test_trivial_circuit() {
         use crate::pairing::bn256::{Bn256, Fr};
-        use crate::worker::Worker;
         use crate::plonk::plookup::lookup_table::XorTable;
-
-
+        use crate::worker::Worker;
 
         let mut assembly = GeneratorAssembly4WithNextStep::<Bn256>::new();
 
         let circuit = TestCircuit4::<Bn256> {
-            _marker: PhantomData
+            _marker: PhantomData,
         };
 
         circuit.synthesize(&mut assembly).expect("must work");
@@ -749,8 +812,24 @@ mod test {
         let dummy_1 = Fr::from_str("123").unwrap();
         let dummy_2 = Fr::from_str("456").unwrap();
 
-        let a = vec![a_var_value, b_var_value, a_var_value, a_var_value, zero, zero, zero];
-        let b = vec![b_var_value, c_var_value, b_var_value, b_var_value, zero, zero, zero];
+        let a = vec![
+            a_var_value,
+            b_var_value,
+            a_var_value,
+            a_var_value,
+            zero,
+            zero,
+            zero,
+        ];
+        let b = vec![
+            b_var_value,
+            c_var_value,
+            b_var_value,
+            b_var_value,
+            zero,
+            zero,
+            zero,
+        ];
         let c = vec![dummy_1, zero, zero, c_var_value, zero, zero, zero];
         let d = vec![zero, dummy_2, c_var_value, d_var_value, zero, zero, zero];
 
@@ -775,9 +854,11 @@ mod test {
         let mut subproducts: Vec<Vec<Fr>> = vec![vec![]; 4];
         let mut permuted_subproducts: Vec<Vec<Fr>> = vec![vec![]; 4];
 
-        for (((wit, perm, non_res), subprod), permuted_subprod) in p.into_iter()
-                                .zip(subproducts.iter_mut())
-                                .zip(permuted_subproducts.iter_mut()) {
+        for (((wit, perm, non_res), subprod), permuted_subprod) in p
+            .into_iter()
+            .zip(subproducts.iter_mut())
+            .zip(permuted_subproducts.iter_mut())
+        {
             let mut current = non_res; // omega^0 * k
             for (el, sig) in wit.iter().zip(perm.as_ref().iter()) {
                 let mut tmp = current;

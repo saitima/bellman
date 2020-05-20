@@ -152,7 +152,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomials<E, P> {
             next_step_selector_polynomials: next_step_selectors,
             permutation_polynomials: permutation_polys,
             lookup_table_polynomials: vec![], // TODO
-            range_table_polynomials: vec![], // TODO
+            range_table_polynomials: vec![],  // TODO
 
             _marker: std::marker::PhantomData,
         };
@@ -203,9 +203,9 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomialsPrecomputatio
         // let coset_generator = E::Fr::one();
 
         // we do not precompute q_const as we need to use it for public inputs;
-        let selector_q_const_index = setup.selector_polynomials.len()-3;
+        let selector_q_const_index = setup.selector_polynomials.len() - 3;
         for (i, p) in setup.selector_polynomials.iter().enumerate() {
-            if i == selector_q_const_index{
+            if i == selector_q_const_index {
                 // println!("skipipng const poly");
                 continue;
             }
@@ -297,9 +297,8 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> SetupPolynomialsPrecomputatio
 }
 
 #[derive(Clone, Debug)]
-pub struct PlookupProof<E: Engine>{
-
-    pub std_grand_product_commitment:  E::G1Affine,
+pub struct PlookupProof<E: Engine> {
+    pub std_grand_product_commitment: E::G1Affine,
     pub std_s_commitment: E::G1Affine,
 
     pub std_lookup_selector_at_z: E::Fr,
@@ -311,7 +310,7 @@ pub struct PlookupProof<E: Engine>{
     pub std_table_columns_at_z: [E::Fr; 4],
     pub std_shifted_table_columns_at_z: [E::Fr; 4],
 
-    pub range_grand_product_commitment:  E::G1Affine,
+    pub range_grand_product_commitment: E::G1Affine,
     pub range_s_commitment: E::G1Affine,
 
     pub range_lookup_selector_at_z: E::Fr,
@@ -325,10 +324,10 @@ pub struct PlookupProof<E: Engine>{
     pub t_opening_proof: E::G1Affine,
 }
 
-impl<E: Engine> PlookupProof<E>{
-    fn empty() -> Self{
+impl<E: Engine> PlookupProof<E> {
+    fn empty() -> Self {
         use crate::pairing::CurveAffine;
-        Self{
+        Self {
             std_grand_product_commitment: E::G1Affine::zero(),
             std_s_commitment: E::G1Affine::zero(),
 
@@ -343,7 +342,7 @@ impl<E: Engine> PlookupProof<E>{
 
             range_grand_product_commitment: E::G1Affine::zero(),
             range_s_commitment: E::G1Affine::zero(),
-            
+
             range_lookup_selector_at_z: E::Fr::zero(),
             range_lookup_table_id_selector_at_z: E::Fr::zero(),
             range_grand_product_at_z: E::Fr::zero(),
@@ -541,7 +540,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> Proof<E, P> {
             linearization_polynomial_at_z,
             permutation_polynomials_at_z: permutation_polynomials_at_z,
 
-            plookup_proof: PlookupProof::empty(), // TODO: 
+            plookup_proof: PlookupProof::empty(), // TODO:
 
             opening_at_z_proof: opening_at_z_proof,
             opening_at_z_omega_proof: opening_at_z_omega_proof,
@@ -573,7 +572,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>> VerificationKey<E, P> {
         worker: &Worker,
         crs: &Crs<E, CrsForMonomialForm>,
     ) -> Result<Self, SynthesisError> {
-        assert_eq!(setup.selector_polynomials.len(), P::STATE_WIDTH + 5 );
+        assert_eq!(setup.selector_polynomials.len(), P::STATE_WIDTH + 5);
         if P::CAN_ACCESS_NEXT_TRACE_STEP == false {
             assert_eq!(setup.next_step_selector_polynomials.len(), 0);
         }

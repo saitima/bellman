@@ -1,10 +1,10 @@
 use crate::pairing::ff::{Field, PrimeField};
-use crate::pairing::{Engine};
+use crate::pairing::Engine;
 
-use crate::{SynthesisError};
+use crate::plonk::domains::*;
 use crate::plonk::polynomials::*;
 use crate::worker::Worker;
-use crate::plonk::domains::*;
+use crate::SynthesisError;
 
 use std::marker::PhantomData;
 
@@ -13,8 +13,8 @@ use super::keys::{Proof, VerificationKey};
 
 use crate::source::{DensityTracker, DensityTrackerersChain};
 
-use crate::kate_commitment::*;
 use super::utils::*;
+use crate::kate_commitment::*;
 
 use crate::plonk::commitments::transcript::*;
 
@@ -45,7 +45,6 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
     let plookup_proof = &proof.plookup_proof;
 
-
     let domain = Domain::<E::Fr>::new_for_size(required_domain_size as u64)?;
 
     let selector_q_const_index = P::STATE_WIDTH + 1;
@@ -70,19 +69,21 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     commit_point_as_xy::<E, _>(&mut transcript, &proof.grand_product_commitment);
 
     let plookup_challenge = transcript.get_challenge();
-    
+
     // commit plookup s polynomial
     commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.std_s_commitment);
     // commit plookup grand product
     commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.std_grand_product_commitment);
-    
+
     // commit plookup range s polynomial
     commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.range_s_commitment);
     // commit plookup range grand product
-    commit_point_as_xy::<E, _>(&mut transcript, &plookup_proof.range_grand_product_commitment);
-    
+    commit_point_as_xy::<E, _>(
+        &mut transcript,
+        &plookup_proof.range_grand_product_commitment,
+    );
+
     let alpha = transcript.get_challenge();
-    
 
     // Commit parts of the quotient polynomial
     for w in proof.quotient_poly_commitments.iter() {
@@ -117,10 +118,10 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     transcript.commit_field_element(&plookup_proof.std_s_at_z);
     transcript.commit_field_element(&plookup_proof.std_shifted_s_at_z);
 
-    for el in plookup_proof.std_table_columns_at_z.iter(){
+    for el in plookup_proof.std_table_columns_at_z.iter() {
         transcript.commit_field_element(el);
     }
-    for el in plookup_proof.std_shifted_table_columns_at_z.iter(){
+    for el in plookup_proof.std_shifted_table_columns_at_z.iter() {
         transcript.commit_field_element(el);
     }
 
@@ -130,7 +131,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     transcript.commit_field_element(&plookup_proof.range_grand_product_at_z_omega);
     transcript.commit_field_element(&plookup_proof.range_s_at_z);
 
-    for el in plookup_proof.range_table_columns_at_z.iter(){
+    for el in plookup_proof.range_table_columns_at_z.iter() {
         transcript.commit_field_element(el);
     }
 
@@ -138,12 +139,10 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
     transcript.commit_field_element(&proof.linearization_polynomial_at_z);
 
-
     // do the actual check for relationship at z
 
     {
         let lhs = proof.quotient_polynomial_at_z;
-
 
         let mut quotient_linearization_challenge = E::Fr::one();
 
@@ -165,14 +164,18 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
         let mut z_part = proof.grand_product_at_z_omega;
 
-        for (w, p) in proof.wire_values_at_z.iter().zip(proof.permutation_polynomials_at_z.iter()) {
+        for (w, p) in proof
+            .wire_values_at_z
+            .iter()
+            .zip(proof.permutation_polynomials_at_z.iter())
+        {
             let mut tmp = *p;
             tmp.mul_assign(&beta);
             tmp.add_assign(&gamma);
             tmp.add_assign(&w);
-            
+
             z_part.mul_assign(&tmp);
-        }   
+        }
 
         // last poly value and gamma
         let mut tmp = gamma;
@@ -184,7 +187,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         rhs.sub_assign(&z_part);
 
         quotient_linearization_challenge.mul_assign(&alpha);
-        
+
         // - L_0(z) * \alpha^2
 
         let mut l_0_at_z = evaluate_l0_at_point(required_domain_size as u64, z)?;
@@ -192,28 +195,29 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
         rhs.sub_assign(&l_0_at_z);
 
-        let inverse_vanishing_at_z = evaluate_vanishing_for_size(&z, required_domain_size as u64).inverse().unwrap();
+        let inverse_vanishing_at_z = evaluate_vanishing_for_size(&z, required_domain_size as u64)
+            .inverse()
+            .unwrap();
         rhs.mul_assign(&inverse_vanishing_at_z);
 
         // plookup quotients
         // range
         // let plookup_challenge = E::Fr::from_str("42").unwrap();
-        let lookup_vanishing_at_z = evaluate_inverse_vanishing_poly_with_last_point_cut(required_domain_size, z);
+        let lookup_vanishing_at_z =
+            evaluate_inverse_vanishing_poly_with_last_point_cut(required_domain_size, z);
 
         // std lookup checks
         let mut lookup_std_contribution = {
-            let challenge = plookup_challenge.clone();
             let mut beta_one = E::Fr::one();
             beta_one.add_assign(&beta);
             let mut gamma_beta_one = beta_one.clone();
             gamma_beta_one.mul_assign(&gamma);
 
-
             // f(z) = (a(z) + b(z)*challenge + c(z)*challenge^2 + table_id(z)*challenge^3)*q_lookup(z)
             let mut witness_part = E::Fr::zero();
             let mut scalar = E::Fr::one();
             let wire_values_at_z = &proof.wire_values_at_z[0..3];
-            for p in wire_values_at_z.iter(){
+            for p in wire_values_at_z.iter() {
                 let mut tmp = p.clone();
                 tmp.mul_assign(&scalar);
                 witness_part.add_assign(&tmp);
@@ -226,49 +230,48 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
             witness_part.mul_assign(&plookup_proof.std_lookup_selector_at_z);
             witness_part.add_assign(&gamma);
 
-             // t(z*w) = (t1(z*w) + t2(z*w)*challenge + t3(z*w)*challenge^2 + table_id(z*w)*challenge^3)
-             let mut table_part = E::Fr::zero();
+            // t(z*w) = (t1(z*w) + t2(z*w)*challenge + t3(z*w)*challenge^2 + table_id(z*w)*challenge^3)
+            let mut table_part = E::Fr::zero();
 
-             let mut scalar = E::Fr::one();
-             for p in plookup_proof.std_shifted_table_columns_at_z.iter() {
-                 let mut tmp = p.clone();
-                 tmp.mul_assign(&scalar);
-                 table_part.add_assign(&tmp);
-                 scalar.mul_assign(&challenge);
-             }
-             table_part.mul_assign(&beta);
+            let mut scalar = E::Fr::one();
+            for p in plookup_proof.std_shifted_table_columns_at_z.iter() {
+                let mut tmp = p.clone();
+                tmp.mul_assign(&scalar);
+                table_part.add_assign(&tmp);
+                scalar.mul_assign(&plookup_challenge);
+            }
+            table_part.mul_assign(&beta);
 
-             let mut scalar = E::Fr::one();
-             for p in plookup_proof.std_table_columns_at_z.iter() {
-                 let mut tmp = p.clone();
-                 tmp.mul_assign(&scalar);
-                 table_part.add_assign(&tmp);
-                 scalar.mul_assign(&challenge);
-             }
+            let mut scalar = E::Fr::one();
+            for p in plookup_proof.std_table_columns_at_z.iter() {
+                let mut tmp = p.clone();
+                tmp.mul_assign(&scalar);
+                table_part.add_assign(&tmp);
+                scalar.mul_assign(&plookup_challenge);
+            }
 
-             table_part.add_assign(&gamma_beta_one);
+            table_part.add_assign(&gamma_beta_one);
 
+            // Z(z)*(1+\beta)*(\gamma + f(z)) * (\gama(\beta + 1) + t(z) + t(z*w))
+            // - Z(z*w)*(\gamma(\beta+1) + t(z) + t(z*w))
+            let mut lhs = plookup_proof.std_grand_product_at_z.clone();
+            lhs.mul_assign(&witness_part);
+            lhs.mul_assign(&table_part);
+            lhs.mul_assign(&beta_one);
 
-             // Z(z)*(1+\beta)*(\gamma + f(z)) * (\gama(\beta + 1) + t(z) + t(z*w))
-             // - Z(z*w)*(\gamma(\beta+1) + t(z) + t(z*w))
-             let mut lhs = plookup_proof.std_grand_product_at_z.clone();
-             lhs.mul_assign(&witness_part);
-             lhs.mul_assign(&table_part);
-             lhs.mul_assign(&beta_one);
-             
-             let mut s_part = plookup_proof.std_shifted_s_at_z.clone();
-             s_part.mul_assign(&beta);
-             s_part.add_assign(&plookup_proof.std_s_at_z);
-             s_part.add_assign(&gamma_beta_one);
+            let mut s_part = plookup_proof.std_shifted_s_at_z.clone();
+            s_part.mul_assign(&beta);
+            s_part.add_assign(&plookup_proof.std_s_at_z);
+            s_part.add_assign(&gamma_beta_one);
 
-             let mut rhs = plookup_proof.std_grand_product_at_z_omega.clone();
-             rhs.mul_assign(&s_part);
+            let mut rhs = plookup_proof.std_grand_product_at_z_omega.clone();
+            rhs.mul_assign(&s_part);
 
-             lhs.sub_assign(&rhs);
+            lhs.sub_assign(&rhs);
 
-             lhs.mul_assign(&lookup_vanishing_at_z);
+            lhs.mul_assign(&lookup_vanishing_at_z);
 
-             lhs
+            lhs
         };
 
         quotient_linearization_challenge.mul_assign(&alpha);
@@ -276,13 +279,13 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         lookup_std_contribution.mul_assign(&quotient_linearization_challenge);
 
         rhs.add_assign(&lookup_std_contribution);
-        
+
         let mut plookup_range_contribution = {
             // f(z) = (a(z) + b(z)*challenge + c(z)*challenge^2 + table_id(z)*challenge^3)*q_lookup(z)
             let mut witness_part = E::Fr::zero();
             let mut scalar = E::Fr::one();
             let wire_values_at_z = &proof.wire_values_at_z[0..1];
-            for p in wire_values_at_z.iter(){
+            for p in wire_values_at_z.iter() {
                 let mut tmp = p.clone();
                 tmp.mul_assign(&scalar);
                 witness_part.add_assign(&tmp);
@@ -294,9 +297,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
             // witness_part.add_assign(&table_id_by_challenge);
             witness_part.mul_assign(&plookup_proof.range_lookup_selector_at_z);
 
-            // println!("[v] witness: {}", witness_part);
             witness_part.add_assign(&gamma);
-            
 
             // t(z) = (t1(z) + t2(z)*challenge + t3(z)*challenge^2 + table_id(z)*challenge^3)
             let mut table_part = E::Fr::zero();
@@ -307,7 +308,6 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
                 table_part.add_assign(&tmp);
                 scalar.mul_assign(&plookup_challenge);
             }
-            // println!("[v] table: {}", table_part);
             table_part.add_assign(&gamma);
 
             // Z(z) *(\gamma + f(z)) * (\gamma + t(z)) - Z(z*w) * (\gamma + s(z)) = t(z) * Z_h(z)
@@ -320,7 +320,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
             tmp.add_assign(&gamma);
             tmp.mul_assign(&plookup_proof.range_grand_product_at_z_omega);
 
-            rhs.sub_assign(&tmp);            
+            rhs.sub_assign(&tmp);
 
             rhs.mul_assign(&lookup_vanishing_at_z);
 
@@ -357,7 +357,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
     // calculate the power to add z(X) commitment that is opened at x*omega
     // it's r(X) + witness + all permutations + 1
-    let v_power_for_standalone_z_x_opening = 1 + 1 + P::STATE_WIDTH + (P::STATE_WIDTH-1);
+    let v_power_for_standalone_z_x_opening = 1 + 1 + P::STATE_WIDTH + (P::STATE_WIDTH - 1);
 
     let virtual_commitment_for_linearization_poly = {
         let mut r = E::G1::zero();
@@ -369,21 +369,29 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
             for i in 0..P::STATE_WIDTH {
                 // Q_k(X) * K(z)
-                r.add_assign(&verification_key.selector_commitments[i].mul(proof.wire_values_at_z[i].into_repr()));
+                r.add_assign(
+                    &verification_key.selector_commitments[i]
+                        .mul(proof.wire_values_at_z[i].into_repr()),
+                );
             }
 
             // Q_m(X) * A(z) * B(z)
             let mut scalar = proof.wire_values_at_z[0];
             scalar.mul_assign(&proof.wire_values_at_z[1]);
-            r.add_assign(&verification_key.selector_commitments[selector_q_m_index].mul(scalar.into_repr()));
+            r.add_assign(
+                &verification_key.selector_commitments[selector_q_m_index].mul(scalar.into_repr()),
+            );
 
             // Q_d_next(X) * D(z*omega)
-            r.add_assign(&verification_key.next_step_selector_commitments[0].mul(proof.wire_values_at_z_omega[0].into_repr()));
+            r.add_assign(
+                &verification_key.next_step_selector_commitments[0]
+                    .mul(proof.wire_values_at_z_omega[0].into_repr()),
+            );
         }
 
         // v * [alpha * (a + beta*z + gamma)(b + beta*k_1*z + gamma)()() * z(X) -
         // - \alpha * (a*perm_a(z)*beta + gamma)()()*beta*z(z*omega) * perm_d(X) +
-        // + alpha^2 * L_0(z) * z(X) ] + 
+        // + alpha^2 * L_0(z) * z(X) ] +
         // + v^{P} * u * z(X)
         // and join alpha^2 * L_0(z) and v^{P} * u into the first term containing z(X)
 
@@ -392,8 +400,10 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
             let mut scalar = E::Fr::one();
 
             // permutation part
-            for (wire, non_res) in proof.wire_values_at_z.iter()
-                            .zip(Some(E::Fr::one()).iter().chain(&non_residues)) 
+            for (wire, non_res) in proof
+                .wire_values_at_z
+                .iter()
+                .zip(Some(E::Fr::one()).iter().chain(&non_residues))
             {
                 let mut tmp = z;
                 tmp.mul_assign(&non_res);
@@ -434,8 +444,10 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
             let mut scalar = E::Fr::one();
 
             // permutation part
-            for (wire, perm_at_z) in proof.wire_values_at_z.iter()
-                            .zip(&proof.permutation_polynomials_at_z) 
+            for (wire, perm_at_z) in proof
+                .wire_values_at_z
+                .iter()
+                .zip(&proof.permutation_polynomials_at_z)
             {
                 let mut tmp = beta;
                 tmp.mul_assign(&perm_at_z);
@@ -454,15 +466,27 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         };
 
         {
-            let mut tmp = proof.grand_product_commitment.mul(grand_product_part_at_z.into_repr());
-            tmp.sub_assign(&verification_key.permutation_commitments.last().unwrap().mul(last_permutation_part_at_z.into_repr()));
-            
+            let mut tmp = proof
+                .grand_product_commitment
+                .mul(grand_product_part_at_z.into_repr());
+            tmp.sub_assign(
+                &verification_key
+                    .permutation_commitments
+                    .last()
+                    .unwrap()
+                    .mul(last_permutation_part_at_z.into_repr()),
+            );
+
             r.add_assign(&tmp);
         }
 
         r.mul_assign(v.into_repr());
 
-        r.add_assign(&proof.grand_product_commitment.mul(grand_product_part_at_z_omega.into_repr()));
+        r.add_assign(
+            &proof
+                .grand_product_commitment
+                .mul(grand_product_part_at_z_omega.into_repr()),
+        );
 
         r
     };
@@ -499,9 +523,15 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     debug_assert_eq!(multiopening_challenge, v.pow(&[1 + 4 as u64]));
 
     // and for all permutation polynomials except the last one
-    assert_eq!(verification_key.permutation_commitments.len(), proof.permutation_polynomials_at_z.len() + 1);
+    assert_eq!(
+        verification_key.permutation_commitments.len(),
+        proof.permutation_polynomials_at_z.len() + 1
+    );
 
-    for com in verification_key.permutation_commitments[0..(verification_key.permutation_commitments.len() - 1)].iter() {
+    for com in verification_key.permutation_commitments
+        [0..(verification_key.permutation_commitments.len() - 1)]
+        .iter()
+    {
         multiopening_challenge.mul_assign(&v); // v^{1+STATE_WIDTH + STATE_WIDTH - 1}
         let tmp = com.mul(multiopening_challenge.into_repr());
         commitments_aggregation.add_assign(&tmp);
@@ -514,28 +544,33 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     multiopening_challenge.mul_assign(&v);
     let mut scalar = multiopening_challenge;
     scalar.mul_assign(&u);
-    commitments_aggregation.add_assign(&proof.wire_commitments.last().unwrap().mul(scalar.into_repr()));
+    commitments_aggregation.add_assign(
+        &proof
+            .wire_commitments
+            .last()
+            .unwrap()
+            .mul(scalar.into_repr()),
+    );
 
     // subtract the opening value using one multiplication
 
     let mut multiopening_challenge_for_values = E::Fr::one();
     let mut aggregated_value = proof.quotient_polynomial_at_z;
 
-    for value_at_z in Some(proof.linearization_polynomial_at_z).iter()
-            .chain(&proof.wire_values_at_z)
-            .chain(&proof.permutation_polynomials_at_z) 
-        {
-            multiopening_challenge_for_values.mul_assign(&v);   
-            let mut tmp = *value_at_z;
-            tmp.mul_assign(&multiopening_challenge_for_values);
-            aggregated_value.add_assign(&tmp);
-        }
-
-    
+    for value_at_z in Some(proof.linearization_polynomial_at_z)
+        .iter()
+        .chain(&proof.wire_values_at_z)
+        .chain(&proof.permutation_polynomials_at_z)
+    {
+        multiopening_challenge_for_values.mul_assign(&v);
+        let mut tmp = *value_at_z;
+        tmp.mul_assign(&multiopening_challenge_for_values);
+        aggregated_value.add_assign(&tmp);
+    }
 
     // add parts that are opened at z*omega using `u`
     {
-        multiopening_challenge_for_values.mul_assign(&v);  
+        multiopening_challenge_for_values.mul_assign(&v);
         let mut scalar = multiopening_challenge_for_values;
         scalar.mul_assign(&u);
         let mut tmp = proof.grand_product_at_z_omega;
@@ -544,7 +579,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         aggregated_value.add_assign(&tmp);
     }
     {
-        multiopening_challenge_for_values.mul_assign(&v);  
+        multiopening_challenge_for_values.mul_assign(&v);
         let mut scalar = multiopening_challenge_for_values;
         scalar.mul_assign(&u);
         let mut tmp = proof.wire_values_at_z_omega[0];
@@ -559,7 +594,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     commitments_aggregation.sub_assign(&E::G1Affine::one().mul(aggregated_value.into_repr()));
 
     // now check that
-    // e(proof_for_z + u*proof_for_z_omega, g2^x) = e(z*proof_for_z + z*omega*u*proof_for_z_omega + (aggregated_commitment - aggregated_opening), g2^1) 
+    // e(proof_for_z + u*proof_for_z_omega, g2^x) = e(z*proof_for_z + z*omega*u*proof_for_z_omega + (aggregated_commitment - aggregated_opening), g2^1)
     // with a corresponding change of sign
 
     let mut pair_with_generator = commitments_aggregation;
@@ -573,13 +608,18 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
     pair_with_x.add_assign_mixed(&proof.opening_at_z_proof);
     pair_with_x.negate();
 
-    let valid = E::final_exponentiation(
-        &E::miller_loop(&[
-            (&pair_with_generator.into_affine().prepare(), &verification_key.g2_elements[0].prepare()),
-            (&pair_with_x.into_affine().prepare(), &verification_key.g2_elements[1].prepare())
-        ])
-    ).unwrap() == E::Fqk::one();
-
+    let valid = E::final_exponentiation(&E::miller_loop(&[
+        (
+            &pair_with_generator.into_affine().prepare(),
+            &verification_key.g2_elements[0].prepare(),
+        ),
+        (
+            &pair_with_x.into_affine().prepare(),
+            &verification_key.g2_elements[1].prepare(),
+        ),
+    ]))
+    .unwrap()
+        == E::Fqk::one();
 
     {
         // sanity check for lookup grand product opening proof
@@ -598,29 +638,29 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         let opening_proof = plookup_proof.opening_proof.clone();
 
         // compare pairings
-        let lhs = E::pairing(opening_proof,denominator);
+        let lhs = E::pairing(opening_proof, denominator);
         let rhs = E::pairing(numerator, E::G2Affine::one());
 
         assert_eq!(lhs, rhs);
-   }
+    }
 
-   {
-       // sanity check for quotient polynomial
-       // 
-       // we have t_opening_proof and need to verify against it constituents
-       // which are t1 t2 t3 t4
-       // verification equation: 
+    {
+        // sanity check for quotient polynomial
+        //
+        // we have t_opening_proof and need to verify against it constituents
+        // which are t1 t2 t3 t4
+        // verification equation:
         // ([t_1(x)] + z^n * [t_2(x)] + z^2n * [t_3(x)]  + z^3n * [t_4(x)]) - (t_1(z) + z^n * t_2(z) + z^2n * t_3(z)  + z^3n * t_4(z))
         // ---------------------------------------------------------------------------------------------------------------------------
-        //                          x-z 
+        //                          x-z
 
         // 1. aggrage commitments
         // 2. aggregate evals
         // 3. mul evals by G1Affine::one()
         // 4. sub evals from commitments
-        // 5. compute (x-z) 
+        // 5. compute (x-z)
         //  - subtract G2AFfine::one().mul(z) from g2[0] in verification key
-        // 6. pairing check 
+        // 6. pairing check
 
         // 1
         // A = [t_1(x)] + z^n * [t_2(x)] + z^2n * [t_3(x)]  + z^3n * [t_4(x)]
@@ -635,7 +675,7 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
 
         // 2
         // b =t_1(z) + z^n * t_2(z) + z^2n * t_3(z)  + z^3n * t_4(z)
-        let agg_eval = proof.quotient_polynomial_at_z.clone();        
+        let agg_eval = proof.quotient_polynomial_at_z.clone();
 
         // 3 & 4
         // A - b*G1
@@ -648,13 +688,11 @@ pub fn verify<E: Engine, P: PlonkConstraintSystemParams<E>, T: Transcript<E::Fr>
         let mut denominator = verification_key.g2_elements[1].into_projective();
         denominator.sub_assign(&E::G2Affine::one().mul(z.into_repr()));
 
-        // 6 
-        let lhs = E::pairing(plookup_proof.t_opening_proof, denominator); 
-        let rhs = E::pairing(numerator, E::G2Affine::one()); 
+        // 6
+        let lhs = E::pairing(plookup_proof.t_opening_proof, denominator);
+        let rhs = E::pairing(numerator, E::G2Affine::one());
         assert_eq!(lhs, rhs);
-
-   }
-
+    }
 
     assert!(valid, "pairing check failed");
     Ok(valid)

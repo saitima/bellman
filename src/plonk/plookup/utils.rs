@@ -1,16 +1,16 @@
 use crate::ff::PrimeField;
-use crate::pairing::{Engine, CurveAffine};
 use crate::multicore::Worker;
-use crate::SynthesisError;
+use crate::pairing::{CurveAffine, Engine};
+use crate::plonk::commitments::transcript::Transcript;
 use crate::plonk::domains::Domain;
 use crate::plonk::polynomials::*;
-use crate::plonk::commitments::transcript::Transcript;
+use crate::SynthesisError;
 
 pub(crate) fn calculate_inverse_vanishing_polynomial_in_a_coset<F: PrimeField>(
-    worker: &Worker, 
-    poly_size: usize, 
-    vahisning_size: usize
-) -> Result<Polynomial::<F, Values>, SynthesisError> {
+    worker: &Worker,
+    poly_size: usize,
+    vahisning_size: usize,
+) -> Result<Polynomial<F, Values>, SynthesisError> {
     assert!(poly_size.is_power_of_two());
     assert!(vahisning_size.is_power_of_two());
 
@@ -28,7 +28,8 @@ pub(crate) fn calculate_inverse_vanishing_polynomial_in_a_coset<F: PrimeField>(
     let mut negative_one = F::one();
     negative_one.negate();
 
-    let mut numerator = Polynomial::<F, Values>::from_values(vec![multiplicative_generator; poly_size])?;
+    let mut numerator =
+        Polynomial::<F, Values>::from_values(vec![multiplicative_generator; poly_size])?;
     // evaluate X in linear time
 
     numerator.distribute_powers(&worker, numerator.omega);
@@ -40,7 +41,7 @@ pub(crate) fn calculate_inverse_vanishing_polynomial_in_a_coset<F: PrimeField>(
     // now we should evaluate X^(n+1) - 1 in a linear time
 
     let shift = multiplicative_generator.pow([vahisning_size as u64]);
-    
+
     let mut denominator = Polynomial::<F, Values>::from_values(vec![shift; poly_size])?;
 
     // elements are h^size - 1, (hg)^size - 1, (hg^2)^size - 1, ...
@@ -56,8 +57,8 @@ pub(crate) fn calculate_inverse_vanishing_polynomial_in_a_coset<F: PrimeField>(
 }
 
 pub(crate) fn evaluate_inverse_vanishing_poly_with_last_point_cut<F: PrimeField>(
-    vahisning_size: usize, 
-    point: F
+    vahisning_size: usize,
+    point: F,
 ) -> F {
     assert!(vahisning_size.is_power_of_two());
 
@@ -83,10 +84,10 @@ pub(crate) fn evaluate_inverse_vanishing_poly_with_last_point_cut<F: PrimeField>
 }
 
 pub(crate) fn calculate_lagrange_poly<F: PrimeField>(
-    worker: &Worker, 
-    poly_size:usize, 
-    poly_number: usize
-) -> Result<Polynomial::<F, Coefficients>, SynthesisError> {
+    worker: &Worker,
+    poly_size: usize,
+    poly_number: usize,
+) -> Result<Polynomial<F, Coefficients>, SynthesisError> {
     assert!(poly_size.is_power_of_two());
     assert!(poly_number < poly_size);
 
@@ -101,7 +102,7 @@ pub(crate) fn evaluate_vanishing_polynomial_of_degree_on_domain_size<F: PrimeFie
     vanishing_degree: u64,
     coset_factor: &F,
     domain_size: u64,
-    worker: &Worker
+    worker: &Worker,
 ) -> Result<Polynomial<F, Values>, SynthesisError> {
     let domain = Domain::<F>::new_for_size(domain_size)?;
     let domain_generator = domain.generator;
@@ -132,7 +133,10 @@ pub(crate) fn evaluate_vanishing_polynomial_of_degree_on_domain_size<F: PrimeFie
     Polynomial::from_values(result)
 }
 
-pub(crate) fn evaluate_vanishing_for_size<F: PrimeField>(point: &F, vanishing_domain_size: u64) -> F {
+pub(crate) fn evaluate_vanishing_for_size<F: PrimeField>(
+    point: &F,
+    vanishing_domain_size: u64,
+) -> F {
     let mut result = point.pow(&[vanishing_domain_size]);
     result.sub_assign(&F::one());
 
@@ -141,7 +145,7 @@ pub(crate) fn evaluate_vanishing_for_size<F: PrimeField>(point: &F, vanishing_do
 
 pub(crate) fn evaluate_l0_at_point<F: PrimeField>(
     domain_size: u64,
-    point: F
+    point: F,
 ) -> Result<F, SynthesisError> {
     let size_as_fe = F::from_str(&format!("{}", domain_size)).unwrap();
 
@@ -159,9 +163,9 @@ pub(crate) fn evaluate_l0_at_point<F: PrimeField>(
 }
 
 pub(crate) fn evaluate_lagrange_poly_at_point<F: PrimeField>(
-    poly_number: usize, 
+    poly_number: usize,
     domain: &Domain<F>,
-    point: F
+    point: F,
 ) -> Result<F, SynthesisError> {
     // lagrange polynomials have a form
     // (omega^i / N) / (X - omega^i) * (X^N - 1)
@@ -185,10 +189,13 @@ pub(crate) fn evaluate_lagrange_poly_at_point<F: PrimeField>(
 
 use crate::ff::SqrtField;
 
-pub(crate) fn make_non_residues<F: PrimeField + SqrtField>(num: usize, domain: &Domain<F>) -> Vec<F> {
+pub(crate) fn make_non_residues<F: PrimeField + SqrtField>(
+    num: usize,
+    domain: &Domain<F>,
+) -> Vec<F> {
     use crate::ff::LegendreSymbol;
-    
-    // we need to check that 
+
+    // we need to check that
     // - some k is not a residue
     // - it's NOT a part of coset formed as other_k * {1, omega^1, ...}
 
@@ -202,7 +209,7 @@ pub(crate) fn make_non_residues<F: PrimeField + SqrtField>(num: usize, domain: &
             } else {
                 let mut is_unique = true;
                 {
-                    // first pow into the domain size 
+                    // first pow into the domain size
                     let tmp = current.pow(&[domain.size]);
                     // then check: if it's in some other coset, then
                     // X^N == other_k ^ N
@@ -230,7 +237,7 @@ pub(crate) fn make_non_residues<F: PrimeField + SqrtField>(num: usize, domain: &
 
 pub fn commit_point_as_xy<E: Engine, T: Transcript<E::Fr>>(
     transcript: &mut T,
-    point: &E::G1Affine
+    point: &E::G1Affine,
 ) {
     use crate::ff::Field;
 
